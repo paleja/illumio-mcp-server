@@ -123,6 +123,8 @@ Add the following to the `custom_settings` section:
     - `any` (default) — IP list Any (0.0.0.0/0) as consumer, deny only at destination. Safest.
     - `ams` — All Workloads as consumer, deny pushed to every managed workload. Broader.
     - `ams_and_any` — Both. Maximum coverage.
+  - **Policy coverage awareness** — each rule is annotated as `already_allowed` (traffic covered by existing policy, created for documentation) or `newly_allowed` (filling a policy gap). Summary shows how many remote apps are already covered vs need new rules.
+  - **`skip_allowed` parameter** — set to `true` to only create rules for traffic not yet covered by existing policy, producing minimal rulesets that fill gaps only
   - **Merge-safe** — detects existing rulesets and rules, never creates duplicates
   - **Dry-run support** — preview what would be created without making changes
 

@@ -19,6 +19,7 @@ Rules in Illumio are processed in this order:
 - **Standard ringfence**: intra-scope allow rule + extra-scope allow rules for known remote apps
 - **Selective ringfence**: adds a **deny rule** (step 4) blocking all inbound, so in selective mode (where default=allow) the deny rule enforces the ringfence. Known remote apps get **allow rules** (step 3) which are processed before the deny rule.
 - Override Deny is NOT used for ringfencing. It's for emergency scenarios where you need to block traffic that would otherwise be allowed.
+- **Policy coverage**: Traffic flows have `policy_decision` (allowed, potentially_blocked, blocked). When creating ringfence rules, each remote app is tagged as `already_allowed` (all flows already covered by existing policy) or `newly_allowed` (at least one flow would be blocked). By default, rules are created for ALL observed traffic for documentation value. `skip_allowed=true` skips already-covered apps for minimal rulesets.
 
 ### Deny Consumer Flavors (deny_consumer parameter)
 

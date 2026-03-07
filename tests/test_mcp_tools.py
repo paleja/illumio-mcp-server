@@ -1023,6 +1023,58 @@ class TestRingfence:
         assert data.get("deny_consumer") == "ams_and_any"
         assert "maximum coverage" in data.get("message", "").lower()
 
+    async def test_ringfence_dry_run_policy_coverage(self):
+        """Dry run should include policy_coverage summary with already/newly allowed counts."""
+        result = await run_tool("create-ringfence", {
+            "app_name": "pos",
+            "env_name": "Staging",
+            "dry_run": True,
+            "lookback_days": 90
+        })
+        data = parse_result(result)
+        assert_no_error(data, "ringfence dry run policy coverage")
+        assert "policy_coverage" in data, "Expected policy_coverage in dry run output"
+        pc = data["policy_coverage"]
+        assert "already_allowed" in pc
+        assert "newly_allowed" in pc
+        assert "total_remote_apps" in pc
+        assert pc["total_remote_apps"] == pc["already_allowed"] + pc["newly_allowed"]
+
+        # Each inbound remote app should have a coverage field
+        for app_info in data.get("inbound_remote_apps", []):
+            assert "coverage" in app_info, f"Remote app {app_info.get('app')} missing coverage field"
+            assert app_info["coverage"] in ("already_allowed", "newly_allowed", "unknown")
+
+    async def test_ringfence_dry_run_skip_allowed(self):
+        """With skip_allowed=true, already-allowed remote apps should be excluded."""
+        # First get the full list
+        result_full = await run_tool("create-ringfence", {
+            "app_name": "pos",
+            "env_name": "Staging",
+            "dry_run": True,
+            "lookback_days": 90,
+            "skip_allowed": False
+        })
+        data_full = parse_result(result_full)
+        full_count = len(data_full.get("inbound_remote_apps", []))
+
+        # Now with skip_allowed
+        result_skip = await run_tool("create-ringfence", {
+            "app_name": "pos",
+            "env_name": "Staging",
+            "dry_run": True,
+            "lookback_days": 90,
+            "skip_allowed": True
+        })
+        data_skip = parse_result(result_skip)
+        skip_count = len(data_skip.get("inbound_remote_apps", []))
+
+        already = data_full.get("policy_coverage", {}).get("already_allowed", 0)
+        if already > 0:
+            assert skip_count < full_count, \
+                f"skip_allowed should reduce remote apps (full={full_count}, skip={skip_count}, already_allowed={already})"
+            assert "skipped_already_allowed" in data_skip
+
     async def test_ringfence_create_standard_pos_staging(self):
         """Create a standard (non-selective) ringfence for app=pos, env=Staging.
         Does NOT delete the ruleset so it can be manually inspected."""

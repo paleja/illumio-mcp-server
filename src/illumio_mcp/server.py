@@ -956,6 +956,15 @@ reducing risk without requiring per-port policies.""",
                             "This gets you to enforcement faster than full enforcement mode.",
                         "default": False
                     },
+                    "skip_allowed": {
+                        "type": "boolean",
+                        "description": "If true, skip creating rules for remote apps whose traffic is already "
+                            "fully allowed by existing policy. Default is false, meaning rules are created "
+                            "for all observed traffic regardless of policy decision. This makes the ringfence "
+                            "ruleset self-documenting — it shows the complete picture of app connectivity. "
+                            "Set to true for minimal rulesets that only fill policy gaps.",
+                        "default": False
+                    },
                     "deny_consumer": {
                         "type": "string",
                         "enum": ["any", "ams", "ams_and_any"],
@@ -2655,6 +2664,7 @@ async def handle_call_tool(
             dry_run = arguments.get("dry_run", False)
             selective = arguments.get("selective", False)
             deny_consumer = arguments.get("deny_consumer", "any")
+            skip_allowed = arguments.get("skip_allowed", False)
             rs_name = arguments.get("ruleset_name", f"RF-{app_name}-{env_name}")
 
             # Step 1: Find app and env labels
@@ -2757,6 +2767,7 @@ async def handle_call_tool(
 
             remote_apps_inbound = {}  # key: (app_value, env_value) -> list of {port, proto, connections}
             remote_apps_outbound = {}
+            remote_apps_policy = {}  # key: (app_value, env_value) -> set of policy_decisions
 
             if not inbound_df.empty:
                 # Group inbound by source app+env to find unique remote apps connecting in
@@ -2767,6 +2778,8 @@ async def handle_call_tool(
                     src_group_cols.append('src_env')
                 if src_group_cols and 'port' in inbound_df.columns and 'proto' in inbound_df.columns:
                     group_cols = src_group_cols + ['port', 'proto']
+                    if 'policy_decision' in inbound_df.columns:
+                        group_cols.append('policy_decision')
                     group_cols = [c for c in group_cols if c in inbound_df.columns]
                     inbound_grouped = inbound_df.groupby(group_cols)['num_connections'].sum().reset_index()
                     for _, row in inbound_grouped.iterrows():
@@ -2779,10 +2792,15 @@ async def handle_call_tool(
                         key = (src_app_val, src_env_val)
                         if key not in remote_apps_inbound:
                             remote_apps_inbound[key] = []
+                        if key not in remote_apps_policy:
+                            remote_apps_policy[key] = set()
+                        policy = row.get('policy_decision', 'unknown')
+                        remote_apps_policy[key].add(policy)
                         remote_apps_inbound[key].append({
                             "port": int(row['port']) if 'port' in row else None,
                             "proto": int(row['proto']) if 'proto' in row else None,
-                            "connections": int(row['num_connections'])
+                            "connections": int(row['num_connections']),
+                            "policy_decision": policy
                         })
 
             if not outbound_df.empty:
@@ -2813,6 +2831,28 @@ async def handle_call_tool(
 
             logger.debug(f"Discovered {len(remote_apps_inbound)} inbound remote apps, {len(remote_apps_outbound)} outbound remote apps")
 
+            # Classify each remote app's policy coverage
+            # "already_allowed" = all flows are policy_decision=allowed
+            # "newly_allowed" = at least one flow is potentially_blocked or blocked
+            remote_apps_coverage = {}
+            for key, decisions in remote_apps_policy.items():
+                if decisions <= {'allowed'}:
+                    remote_apps_coverage[key] = "already_allowed"
+                else:
+                    remote_apps_coverage[key] = "newly_allowed"
+
+            already_allowed_count = sum(1 for v in remote_apps_coverage.values() if v == "already_allowed")
+            newly_allowed_count = sum(1 for v in remote_apps_coverage.values() if v == "newly_allowed")
+
+            # If skip_allowed, remove already-allowed remote apps
+            skipped_already_allowed = []
+            if skip_allowed:
+                for key in list(remote_apps_inbound.keys()):
+                    if remote_apps_coverage.get(key) == "already_allowed":
+                        logger.debug(f"Skipping already-allowed remote app: app={key[0]}, env={key[1]}")
+                        skipped_already_allowed.append({"app": key[0], "env": key[1]})
+                        del remote_apps_inbound[key]
+
             # Step 6: Build the result summary
             summary = {
                 "app": app_name,
@@ -2820,8 +2860,22 @@ async def handle_call_tool(
                 "app_label_href": app_label.href,
                 "env_label_href": env_label.href,
                 "lookback_days": lookback_days,
+                "skip_allowed": skip_allowed,
+                "policy_coverage": {
+                    "already_allowed": already_allowed_count,
+                    "newly_allowed": newly_allowed_count,
+                    "total_remote_apps": already_allowed_count + newly_allowed_count,
+                    "description": (
+                        f"{already_allowed_count} remote apps already covered by existing policy, "
+                        f"{newly_allowed_count} need new rules"
+                    )
+                },
                 "inbound_remote_apps": [
-                    {"app": k[0], "env": k[1], "observed_ports": v}
+                    {
+                        "app": k[0], "env": k[1],
+                        "coverage": remote_apps_coverage.get(k, "unknown"),
+                        "observed_ports": v
+                    }
                     for k, v in sorted(remote_apps_inbound.items())
                 ],
                 "outbound_remote_apps": [
@@ -2829,6 +2883,8 @@ async def handle_call_tool(
                     for k, v in sorted(remote_apps_outbound.items())
                 ],
             }
+            if skipped_already_allowed:
+                summary["skipped_already_allowed"] = skipped_already_allowed
 
             summary["selective"] = selective
             if selective:
@@ -3042,6 +3098,7 @@ async def handle_call_tool(
                     ingress_services=extra_services,
                     unscoped_consumers=True
                 )
+                coverage = remote_apps_coverage.get((remote_app, remote_env), "unknown")
                 created_extra = pce.rules.create(extra_rule, parent=ruleset)
                 created_rules.append({
                     "type": "extra-scope allow (inbound)",
@@ -3050,10 +3107,19 @@ async def handle_call_tool(
                     "consumers": f"app={remote_app}, env={remote_env}",
                     "providers": "All Workloads (in scope)",
                     "services": "All Services",
+                    "coverage": coverage,
                     "observed_ports": ports
                 })
 
             # Build summary message
+            extra_rules = [r for r in created_rules if r["type"] == "extra-scope allow (inbound)"]
+            already_count = sum(1 for r in extra_rules if r.get("coverage") == "already_allowed")
+            newly_count = sum(1 for r in extra_rules if r.get("coverage") == "newly_allowed")
+            coverage_note = ""
+            if already_count > 0 or newly_count > 0:
+                coverage_note = (f" Policy coverage: {already_count} rules for already-allowed traffic "
+                    f"(documentation), {newly_count} rules for newly-allowed traffic (filling gaps).")
+
             if selective:
                 deny_count = sum(1 for r in created_rules if r["type"].startswith("deny"))
                 allow_count = sum(1 for r in created_rules if "allow" in r["type"])
@@ -3062,9 +3128,10 @@ async def handle_call_tool(
                     f"{allow_count} allow (intra-scope + known remote apps), "
                     f"{deny_count} deny-all-inbound. "
                     f"In selective mode: allows are processed before deny, so known apps pass through "
-                    f"and everything else is blocked by the deny rule.")
+                    f"and everything else is blocked by the deny rule.{coverage_note}")
             else:
-                summary["message"] = f"Ringfence created with {len(created_rules)} rules ({1} intra-scope + {len(created_rules) - 1} extra-scope inbound)"
+                summary["message"] = (f"Ringfence created with {len(created_rules)} rules "
+                    f"({1} intra-scope + {len(created_rules) - 1} extra-scope inbound).{coverage_note}")
 
             summary["ruleset"] = {
                 "href": ruleset.href,

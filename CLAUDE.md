@@ -20,6 +20,14 @@ Rules in Illumio are processed in this order:
 - **Selective ringfence**: adds a **deny rule** (step 4) blocking all inbound, so in selective mode (where default=allow) the deny rule enforces the ringfence. Known remote apps get **allow rules** (step 3) which are processed before the deny rule.
 - Override Deny is NOT used for ringfencing. It's for emergency scenarios where you need to block traffic that would otherwise be allowed.
 
+### Deny Consumer Flavors (deny_consumer parameter)
+
+Illumio writes deny rules to the **source workload** (consumer side). The `deny_consumer` parameter controls where the deny rule is enforced:
+
+- **`any`** (default): Consumer = IP list "Any (0.0.0.0/0)". Deny rule is only written to the **destination workloads** inside the scope. No impact on remote workloads. Safest option.
+- **`ams`**: Consumer = All Workloads. Deny rule gets pushed to **every managed workload** outside the scope. Broader enforcement but wider blast radius.
+- **`ams_and_any`**: Consumer = All Workloads + Any IP list. Maximum coverage — deny enforced at both managed source workloads and destination workloads.
+
 ## PCE API Notes
 
 - Deny rules use `/deny_rules` endpoint on rulesets with `"override": true/false` in payload

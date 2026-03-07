@@ -955,6 +955,19 @@ reducing risk without requiring per-port policies.""",
                             "so known apps pass through and everything else hits the deny. "
                             "This gets you to enforcement faster than full enforcement mode.",
                         "default": False
+                    },
+                    "deny_consumer": {
+                        "type": "string",
+                        "enum": ["any", "ams", "ams_and_any"],
+                        "description": "Controls which consumers the deny rule targets (only used with selective=true). "
+                            "Illumio pushes deny rules to the source workload, so this choice matters: "
+                            "'any' (default) = IP list Any (0.0.0.0/0) as consumer, deny rule only written to "
+                            "destination workloads inside the scope. Safest, no impact on remote workloads. "
+                            "'ams' = All Workloads as consumer, deny rule pushed to every managed workload "
+                            "outside the scope. Broader enforcement but wider blast radius. "
+                            "'ams_and_any' = both All Workloads and Any IP list, maximum coverage for "
+                            "managed and unmanaged sources.",
+                        "default": "any"
                     }
                 },
                 "required": ["app_name", "env_name"]
@@ -2612,6 +2625,7 @@ async def handle_call_tool(
             lookback_days = arguments.get("lookback_days", 30)
             dry_run = arguments.get("dry_run", False)
             selective = arguments.get("selective", False)
+            deny_consumer = arguments.get("deny_consumer", "any")
             rs_name = arguments.get("ruleset_name", f"RF-{app_name}-{env_name}")
 
             # Step 1: Find app and env labels
@@ -2632,7 +2646,7 @@ async def handle_call_tool(
             for l in pce.labels.get(params={'max_results': 10000}):
                 label_href_map[l.href] = {"key": l.key, "value": l.value}
 
-            # Step 2: Find "All Services" service object
+            # Step 2: Find "All Services" service object and "Any (0.0.0.0/0)" IP list
             all_services = pce.services.get(params={"name": "All Services"})
             all_services_href = None
             if all_services:
@@ -2640,6 +2654,22 @@ async def handle_call_tool(
                 logger.debug(f"Found All Services: {all_services_href}")
             else:
                 logger.warning("'All Services' service object not found, will use port -1 fallback")
+
+            any_iplist_href = None
+            if deny_consumer in ("any", "ams_and_any"):
+                any_iplists = pce.ip_lists.get(params={"name": "Any (0.0.0.0/0 and ::/0)"})
+                if any_iplists:
+                    any_iplist_href = any_iplists[0].href
+                    logger.debug(f"Found Any IP list: {any_iplist_href}")
+                else:
+                    # Try alternate name
+                    any_iplists = pce.ip_lists.get(params={"name": "Any (0.0.0.0/0)"})
+                    if any_iplists:
+                        any_iplist_href = any_iplists[0].href
+                        logger.debug(f"Found Any IP list (alt name): {any_iplist_href}")
+                    else:
+                        logger.warning("'Any' IP list not found, falling back to deny_consumer='ams'")
+                        deny_consumer = "ams"
 
             # Step 3: Query traffic flows for this app+env (as destination = inbound)
             start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
@@ -2772,13 +2802,21 @@ async def handle_call_tool(
             }
 
             summary["selective"] = selective
+            if selective:
+                summary["deny_consumer"] = deny_consumer
 
             if dry_run:
                 summary["dry_run"] = True
                 if selective:
-                    summary["message"] = ("Dry run - no changes made. Selective mode: will create allow rules for known remote apps "
-                        "plus a deny rule blocking all other inbound traffic. Rule order: allow rules are processed before deny, "
-                        "so known apps pass through. Review and run again with dry_run=false.")
+                    consumer_explain = {
+                        "any": "Any (0.0.0.0/0) as consumer - deny rule only written to destination workloads (safest)",
+                        "ams": "All Workloads as consumer - deny rule pushed to every managed source workload",
+                        "ams_and_any": "All Workloads + Any (0.0.0.0/0) - maximum coverage for managed and unmanaged sources"
+                    }
+                    summary["message"] = (f"Dry run - no changes made. Selective mode with deny_consumer='{deny_consumer}': "
+                        f"{consumer_explain.get(deny_consumer, '')}. "
+                        "Will create allow rules for known remote apps plus a deny rule blocking all other inbound. "
+                        "Rule order: allow > deny > default(allow-all). Review and run again with dry_run=false.")
                 else:
                     summary["message"] = "Dry run - no changes made. Review the discovered traffic and run again with dry_run=false to create the ringfence."
                 return [types.TextContent(type="text", text=json.dumps(summary, indent=2))]
@@ -2795,6 +2833,15 @@ async def handle_call_tool(
                 summary["merged"] = True
 
                 # Scan existing allow rules for duplicates
+                # SDK returns Actor objects: Actor(actors='ams') or Actor(label=Reference(href='...'))
+                def is_ams_actor(actor):
+                    return hasattr(actor, 'actors') and actor.actors == 'ams'
+
+                def get_label_href(actor):
+                    if hasattr(actor, 'label') and actor.label and hasattr(actor.label, 'href'):
+                        return actor.label.href
+                    return None
+
                 for rule in ruleset.rules:
                     rule_app = None
                     rule_env = None
@@ -2804,18 +2851,20 @@ async def handle_call_tool(
 
                     if rule.consumers:
                         for c in rule.consumers:
-                            if c == AMS or (hasattr(c, 'actors') and str(c) == 'ams'):
+                            if is_ams_actor(c):
                                 is_ams_consumers = True
-                            elif hasattr(c, 'href'):
-                                info = label_href_map.get(c.href, {})
-                                if info.get("key") == "app":
-                                    rule_app = info.get("value")
-                                elif info.get("key") == "env":
-                                    rule_env = info.get("value")
+                            else:
+                                href = get_label_href(c)
+                                if href:
+                                    info = label_href_map.get(href, {})
+                                    if info.get("key") == "app":
+                                        rule_app = info.get("value")
+                                    elif info.get("key") == "env":
+                                        rule_env = info.get("value")
 
                     if rule.providers:
                         for p in rule.providers:
-                            if p == AMS or (hasattr(p, 'actors') and str(p) == 'ams'):
+                            if is_ams_actor(p):
                                 is_ams_providers = True
 
                     # Detect intra-scope rule: AMS->AMS, not unscoped
@@ -2836,10 +2885,12 @@ async def handle_call_tool(
                     for dr in existing_deny_rules:
                         if not dr.get('override', False):
                             # Regular deny rule - check if it's a deny-all-inbound
+                            # Consumer could be AMS, Any IP list, or both
                             is_unscoped = dr.get('unscoped_consumers', False)
                             consumers_ams = any(c.get('actors') == 'ams' for c in dr.get('consumers', []))
+                            consumers_iplist = any(c.get('ip_list') for c in dr.get('consumers', []))
                             providers_ams = any(p.get('actors') == 'ams' for p in dr.get('providers', []))
-                            if is_unscoped and consumers_ams and providers_ams:
+                            if is_unscoped and (consumers_ams or consumers_iplist) and providers_ams:
                                 has_deny_all_inbound = True
                 except Exception as de:
                     logger.debug(f"Could not fetch deny_rules for merge check: {de}")
@@ -2891,16 +2942,29 @@ async def handle_call_tool(
 
             # Step 10: For selective mode, create a deny rule blocking all inbound traffic
             if selective and not summary.get("has_deny_all_inbound", False):
-                # Build raw deny rule: all inbound to this app is denied
                 if all_services_href:
                     deny_services = [{"href": all_services_href}]
                 else:
                     deny_services = [{"port": -1, "proto": 6}, {"port": -1, "proto": 17}]
 
+                # Build consumers based on deny_consumer flavor
+                if deny_consumer == "any":
+                    deny_consumers = [{"ip_list": {"href": any_iplist_href}}]
+                    consumer_desc = "Any (0.0.0.0/0) - deny written to destination only"
+                elif deny_consumer == "ams":
+                    deny_consumers = [{"actors": "ams"}]
+                    consumer_desc = "All Workloads - deny pushed to all managed source workloads"
+                elif deny_consumer == "ams_and_any":
+                    deny_consumers = [{"actors": "ams"}, {"ip_list": {"href": any_iplist_href}}]
+                    consumer_desc = "All Workloads + Any (0.0.0.0/0) - maximum coverage"
+                else:
+                    deny_consumers = [{"ip_list": {"href": any_iplist_href}}]
+                    consumer_desc = "Any (0.0.0.0/0)"
+
                 deny_payload = {
                     "enabled": True,
                     "providers": [{"actors": "ams"}],
-                    "consumers": [{"actors": "ams"}],
+                    "consumers": deny_consumers,
                     "ingress_services": deny_services,
                     "unscoped_consumers": True,
                     "override": False
@@ -2916,7 +2980,8 @@ async def handle_call_tool(
                     "type": "deny (block all inbound)",
                     "href": deny_result.get("href", ""),
                     "description": f"Deny all inbound traffic to {app_name} ({env_name}) - selective enforcement",
-                    "consumers": "All Workloads (unscoped/external)",
+                    "consumers": consumer_desc,
+                    "deny_consumer_mode": deny_consumer,
                     "providers": "All Workloads (in scope)",
                     "services": "All Services"
                 })

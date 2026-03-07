@@ -988,10 +988,39 @@ class TestRingfence:
         data = parse_result(result)
         assert data.get("dry_run") is True
         assert data.get("selective") is True
+        assert data.get("deny_consumer") == "any", "Default deny_consumer should be 'any'"
         assert data.get("app") == "pos"
         assert data.get("env") == "Staging"
         assert "inbound_remote_apps" in data
         assert "outbound_remote_apps" in data
+
+    async def test_ringfence_dry_run_deny_consumer_ams(self):
+        """Test dry_run with deny_consumer='ams' shows AMS in plan."""
+        result = await run_tool("create-ringfence", {
+            "app_name": "pos",
+            "env_name": "Staging",
+            "dry_run": True,
+            "selective": True,
+            "deny_consumer": "ams",
+            "lookback_days": 90
+        })
+        data = parse_result(result)
+        assert data.get("deny_consumer") == "ams"
+        assert "all workloads" in data.get("message", "").lower()
+
+    async def test_ringfence_dry_run_deny_consumer_ams_and_any(self):
+        """Test dry_run with deny_consumer='ams_and_any' shows both in plan."""
+        result = await run_tool("create-ringfence", {
+            "app_name": "pos",
+            "env_name": "Staging",
+            "dry_run": True,
+            "selective": True,
+            "deny_consumer": "ams_and_any",
+            "lookback_days": 90
+        })
+        data = parse_result(result)
+        assert data.get("deny_consumer") == "ams_and_any"
+        assert "maximum coverage" in data.get("message", "").lower()
 
     async def test_ringfence_create_standard_pos_staging(self):
         """Create a standard (non-selective) ringfence for app=pos, env=Staging.
@@ -1026,7 +1055,7 @@ class TestRingfence:
             assert "allow" in r["type"].lower(), f"Extra-scope rule should be allow, got: {r['type']}"
 
     async def test_ringfence_create_selective_pos_staging(self):
-        """Create a selective ringfence for app=pos, env=Staging.
+        """Create a selective ringfence for app=pos, env=Staging with default deny_consumer='any'.
         Merges into the standard ruleset created above, adding a deny rule.
         Does NOT delete so it can be manually inspected."""
         result = await run_tool("create-ringfence", {
@@ -1035,25 +1064,25 @@ class TestRingfence:
             "lookback_days": 90,
             "dry_run": False,
             "selective": True
+            # deny_consumer defaults to "any"
         })
         data = parse_result(result)
         assert "error" not in data, f"Selective ringfence failed: {data.get('error')}"
         assert data.get("selective") is True
+        assert data.get("deny_consumer") == "any"
 
         rs = data.get("ruleset", {})
         assert rs.get("href"), "Ruleset should have an href"
         rules = rs.get("rules", [])
 
-        # If this is a fresh run, there should be a deny rule in created_rules.
-        # If merged and deny already existed, created_rules won't include it
-        # but has_deny_all_inbound should be True.
         deny_rules = [r for r in rules if r.get("type", "").startswith("deny")]
         if data.get("merged") and data.get("has_deny_all_inbound"):
-            # Deny rule already existed from a prior run - that's fine
             assert len(deny_rules) == 0, "Should not duplicate deny rule on merge"
         else:
             assert len(deny_rules) >= 1, "Expected at least 1 deny-all-inbound rule"
             assert "deny all inbound" in deny_rules[0].get("description", "").lower()
+            assert deny_rules[0].get("deny_consumer_mode") == "any"
+            assert "0.0.0.0" in deny_rules[0].get("consumers", "")
 
     async def test_ringfence_merge_idempotent(self):
         """Running ringfence again on same app should merge without duplicates."""

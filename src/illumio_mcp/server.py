@@ -3585,11 +3585,11 @@ def to_dataframe(flows):
 def summarize_traffic(df):
     logger.debug(f"Summarizing traffic with dataframe: {df}")
     
-    # Define all possible group columns, including IP list columns
+    # Define all possible group columns, including IP list columns and policy decision
     potential_columns = [
         'src_app', 'src_env', 'src_ip_lists',
         'dst_app', 'dst_env', 'dst_ip_lists',
-        'proto', 'port'
+        'proto', 'port', 'policy_decision'
     ]
 
     # Filter to only use columns that exist in the DataFrame
@@ -3649,8 +3649,10 @@ def summarize_traffic(df):
         if src_str != dst_str:
             port_info = f"port {row['port']}" if 'port' in row else "unknown port"
             proto_info = f"proto {row['proto']}" if 'proto' in row else ""
+            policy = row.get('policy_decision', '') if 'policy_decision' in row.index else ''
+            policy_str = f" [{policy}]" if policy else ""
             summary_list.append(
-                f"From {src_str} to {dst_str} on {port_info} {proto_info}: {row['num_connections']} connections"
+                f"From {src_str} to {dst_str} on {port_info} {proto_info}: {row['num_connections']} connections{policy_str}"
             )
 
     if not summary_list:

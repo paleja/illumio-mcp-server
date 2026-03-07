@@ -154,6 +154,32 @@ Add the following to the `custom_settings` section:
 
   **Why this matters:** Infrastructure services are consumed by many apps OR connect out to many apps. If you ringfence apps without allowing infrastructure services first, you break dependencies. This tool tells you what to policy first.
 
+### Policy Lifecycle
+- `provision-policy` — **Provision pending draft changes** to move them from draft to active state. Can provision all pending changes or specific items by href. Includes change descriptions for audit trail.
+- `compare-draft-active` — **Compare draft vs active policy** to preview what would change on provisioning. Shows created, updated, and deleted rulesets, rules, IP lists, and services.
+
+### Enforcement Readiness
+- `enforcement-readiness` — **Assess whether an app is ready for enforcement.** Analyzes traffic flows, existing policy coverage, enforcement modes, and ringfence status. Returns a readiness score (0-100) with actionable recommendations:
+  - **Policy coverage** (40 points) — what percentage of traffic is covered by rules
+  - **Ringfence exists** (20 points) — has a ringfence ruleset been created
+  - **Enforcement mode** (20 points) — are workloads in full/selective/visibility_only
+  - **No blocked traffic** (10 points) — no unintended blocks
+  - **All remote apps covered** (10 points) — no uncovered remote app traffic
+
+### Batch Operations
+- `ringfence-batch` — **Ringfence multiple apps at once.** Optionally uses `identify-infrastructure-services` to auto-order apps by infrastructure score (infrastructure first, then standard apps). Supports dry-run mode to preview all changes before applying.
+
+### Workload Enforcement Status
+- `get-workload-enforcement-status` — **Get enforcement mode status across workloads**, grouped by app and environment. Shows counts per mode (idle, visibility_only, selective, full) and identifies apps with **mixed enforcement states** — a common issue during rollouts.
+
+### Policy Coverage
+- `get-policy-coverage-report` — **Generate a policy coverage report** for an app showing what traffic is covered by existing rules vs what would be blocked. Breaks down by inbound/outbound, identifies uncovered services and remote apps, and provides an overall coverage percentage.
+- `find-unmanaged-traffic` — **Find traffic involving unmanaged workloads** or IP addresses. These are sources/destinations without app/env labels, representing policy blind spots. Filters by direction (inbound/outbound/both) and connection count.
+
+### Security Analysis
+- `detect-lateral-movement-paths` — **Detect potential lateral movement paths** by analyzing app-to-app traffic patterns. Identifies articulation points (bridge nodes) whose compromise would provide access to otherwise disconnected app groups. Computes reachability from any starting app and traces multi-hop paths up to a configurable depth.
+- `compliance-check` — **Check policy compliance** against frameworks (PCI-DSS, NIST 800-53, CIS Controls, or general best practices). Evaluates segmentation, enforcement modes, high-risk port exposure, and policy coverage. Returns a compliance score with per-check findings (PASS/FAIL/WARNING).
+
 ### Event Monitoring
 - `get-events` — Get PCE events with optional filtering by event type, severity, status, and result limits
 

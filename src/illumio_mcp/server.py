@@ -1011,6 +1011,225 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
                 "required": []
             }
         ),
+        types.Tool(
+            name="provision-policy",
+            description="Provision pending draft policy changes in the PCE. This moves draft rulesets, rules, IP lists, services, and label groups from draft to active state. You can provision all pending changes or specific items by href.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "hrefs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of specific draft hrefs to provision (e.g., ['/orgs/1/sec_policy/draft/rule_sets/123']). If omitted, provisions ALL pending changes."
+                    },
+                    "change_description": {
+                        "type": "string",
+                        "description": "Description of the provisioning change (for audit trail)"
+                    }
+                },
+            }
+        ),
+        types.Tool(
+            name="compare-draft-active",
+            description="Compare draft vs active policy to see what would change on provisioning. Shows new, modified, and deleted rulesets, rules, IP lists, and services.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "resource_type": {
+                        "type": "string",
+                        "enum": ["rule_sets", "ip_lists", "services", "all"],
+                        "description": "Type of resource to compare (default: all)",
+                        "default": "all"
+                    }
+                },
+            }
+        ),
+        types.Tool(
+            name="enforcement-readiness",
+            description="Assess whether an application is ready for enforcement by analyzing its traffic flows, existing policy coverage, and identifying potential gaps. Provides a readiness score and actionable recommendations.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "app_name": {
+                        "type": "string",
+                        "description": "Application label value (e.g., 'CRM', 'Ordering')"
+                    },
+                    "env_name": {
+                        "type": "string",
+                        "description": "Environment label value (e.g., 'Production', 'Staging')"
+                    },
+                    "lookback_days": {
+                        "type": "integer",
+                        "description": "Number of days to look back for traffic flows (default: 30)",
+                        "default": 30
+                    }
+                },
+                "required": ["app_name", "env_name"]
+            }
+        ),
+        types.Tool(
+            name="ringfence-batch",
+            description="Create ringfence policies for multiple applications at once. Optionally auto-discovers infrastructure services and ringfences them first, then standard apps. Uses the same logic as create-ringfence for each app.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "apps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "app_name": {"type": "string"},
+                                "env_name": {"type": "string"},
+                                "selective": {"type": "boolean", "default": False}
+                            },
+                            "required": ["app_name", "env_name"]
+                        },
+                        "description": "List of applications to ringfence"
+                    },
+                    "auto_order": {
+                        "type": "boolean",
+                        "description": "If true, uses identify-infrastructure-services to order apps by infrastructure score (infra first). Default: false",
+                        "default": False
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true, preview what would be created without making changes",
+                        "default": False
+                    },
+                    "lookback_days": {
+                        "type": "integer",
+                        "description": "Number of days to look back for traffic flows (default: 30)",
+                        "default": 30
+                    }
+                },
+                "required": ["apps"]
+            }
+        ),
+        types.Tool(
+            name="get-workload-enforcement-status",
+            description="Get enforcement mode status across all workloads, grouped by application and environment. Shows counts per enforcement mode and identifies apps with mixed enforcement states.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "app_name": {
+                        "type": "string",
+                        "description": "Filter by application name (optional)"
+                    },
+                    "env_name": {
+                        "type": "string",
+                        "description": "Filter by environment name (optional)"
+                    }
+                },
+            }
+        ),
+        types.Tool(
+            name="get-policy-coverage-report",
+            description="Generate a policy coverage report for an app, showing what traffic is covered by existing rules vs what would be blocked. Helps understand how much of an app's traffic is already policy'd.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "app_name": {
+                        "type": "string",
+                        "description": "Application label value"
+                    },
+                    "env_name": {
+                        "type": "string",
+                        "description": "Environment label value"
+                    },
+                    "lookback_days": {
+                        "type": "integer",
+                        "description": "Number of days to look back for traffic flows (default: 30)",
+                        "default": 30
+                    }
+                },
+                "required": ["app_name", "env_name"]
+            }
+        ),
+        types.Tool(
+            name="find-unmanaged-traffic",
+            description="Find traffic involving unmanaged (unlabeled) workloads or IP addresses. These are sources or destinations without app/env labels, representing potential policy blind spots.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "lookback_days": {
+                        "type": "integer",
+                        "description": "Number of days to look back (default: 30)",
+                        "default": 30
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["inbound", "outbound", "both"],
+                        "description": "Filter by traffic direction relative to managed workloads (default: both)",
+                        "default": "both"
+                    },
+                    "min_connections": {
+                        "type": "integer",
+                        "description": "Minimum connections to include (filters noise, default: 1)",
+                        "default": 1
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "Number of top results to return (default: 50)",
+                        "default": 50
+                    }
+                },
+            }
+        ),
+        types.Tool(
+            name="detect-lateral-movement-paths",
+            description="Analyze traffic patterns to detect potential lateral movement paths — chains of connections that could allow an attacker to pivot between applications. Identifies apps that serve as bridges between otherwise disconnected app groups.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "app_name": {
+                        "type": "string",
+                        "description": "Starting application to analyze paths from (optional — if omitted, analyzes all apps)"
+                    },
+                    "env_name": {
+                        "type": "string",
+                        "description": "Environment to focus on (optional)"
+                    },
+                    "lookback_days": {
+                        "type": "integer",
+                        "description": "Number of days to look back (default: 30)",
+                        "default": 30
+                    },
+                    "max_hops": {
+                        "type": "integer",
+                        "description": "Maximum number of hops to trace (default: 4)",
+                        "default": 4
+                    }
+                },
+            }
+        ),
+        types.Tool(
+            name="compliance-check",
+            description="Check policy compliance against common frameworks (PCI-DSS, NIST, CIS). Identifies workloads in specific compliance scopes and verifies that segmentation policies meet framework requirements.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "framework": {
+                        "type": "string",
+                        "enum": ["pci-dss", "nist", "cis", "general"],
+                        "description": "Compliance framework to check against (default: general)",
+                        "default": "general"
+                    },
+                    "app_name": {
+                        "type": "string",
+                        "description": "Application to check (optional — if omitted, checks all apps)"
+                    },
+                    "env_name": {
+                        "type": "string",
+                        "description": "Environment to check (optional)"
+                    },
+                    "lookback_days": {
+                        "type": "integer",
+                        "description": "Number of days to look back for traffic analysis (default: 30)",
+                        "default": 30
+                    }
+                },
+            }
+        ),
     ]
 
 @server.call_tool()
@@ -3407,6 +3626,1214 @@ async def handle_call_tool(
 
         except Exception as e:
             error_msg = f"Failed to identify infrastructure services: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "provision-policy":
+        logger.debug("=" * 80)
+        logger.debug("PROVISION POLICY CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            change_description = arguments.get("change_description", "Provisioned via MCP")
+            hrefs = arguments.get("hrefs")
+
+            if hrefs:
+                # Provision specific items
+                payload = {
+                    "update_description": change_description,
+                    "change_subset": {"hrefs": hrefs}
+                }
+            else:
+                # Get all pending changes first
+                resp = pce.get("/sec_policy/pending")
+                pending = resp.json()
+
+                if not pending:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "message": "No pending draft changes to provision",
+                        "status": "no_changes"
+                    }, indent=2))]
+
+                # Collect all pending hrefs
+                pending_hrefs = []
+                for item in pending:
+                    if isinstance(item, dict) and 'href' in item:
+                        pending_hrefs.append(item['href'])
+
+                if not pending_hrefs:
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "message": "No pending draft changes to provision",
+                        "status": "no_changes"
+                    }, indent=2))]
+
+                payload = {
+                    "update_description": change_description,
+                    "change_subset": {"hrefs": pending_hrefs}
+                }
+
+            resp = pce.post("/sec_policy", json=payload)
+            result = resp.json()
+
+            return [types.TextContent(type="text", text=json.dumps({
+                "message": "Policy provisioned successfully",
+                "change_description": change_description,
+                "result": result
+            }, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to provision policy: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "compare-draft-active":
+        logger.debug("=" * 80)
+        logger.debug("COMPARE DRAFT ACTIVE CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            resource_type = arguments.get("resource_type", "all")
+
+            # Get pending changes which show what differs between draft and active
+            resp = pce.get("/sec_policy/pending")
+            pending = resp.json()
+
+            if not pending:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "message": "No differences between draft and active policy",
+                    "status": "in_sync"
+                }, indent=2))]
+
+            changes = {
+                "created": [],
+                "updated": [],
+                "deleted": []
+            }
+
+            for item in pending:
+                if not isinstance(item, dict):
+                    continue
+
+                href = item.get('href', '')
+                change_type = item.get('change_type', 'unknown')
+                item_type = 'unknown'
+
+                if '/rule_sets/' in href:
+                    item_type = 'rule_sets'
+                elif '/ip_lists/' in href:
+                    item_type = 'ip_lists'
+                elif '/services/' in href:
+                    item_type = 'services'
+                elif '/labels/' in href:
+                    item_type = 'labels'
+
+                if resource_type != "all" and item_type != resource_type:
+                    continue
+
+                change_info = {
+                    "href": href,
+                    "type": item_type,
+                    "name": item.get('name', ''),
+                }
+
+                if change_type == 'create':
+                    changes["created"].append(change_info)
+                elif change_type == 'update':
+                    changes["updated"].append(change_info)
+                elif change_type == 'delete':
+                    changes["deleted"].append(change_info)
+                else:
+                    changes.setdefault("other", []).append({**change_info, "change_type": change_type})
+
+            summary = {
+                "total_pending_changes": len(pending),
+                "filter": resource_type,
+                "created_count": len(changes["created"]),
+                "updated_count": len(changes["updated"]),
+                "deleted_count": len(changes["deleted"]),
+                "changes": changes
+            }
+
+            return [types.TextContent(type="text", text=json.dumps(summary, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to compare draft vs active: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "enforcement-readiness":
+        logger.debug("=" * 80)
+        logger.debug("ENFORCEMENT READINESS CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            app_name = arguments["app_name"]
+            env_name = arguments["env_name"]
+            lookback_days = arguments.get("lookback_days", 30)
+
+            # Find labels
+            app_labels = pce.labels.get(params={"key": "app", "value": app_name})
+            if not app_labels:
+                return [types.TextContent(type="text", text=json.dumps({"error": f"App label '{app_name}' not found"}))]
+            app_label = app_labels[0]
+
+            env_labels = pce.labels.get(params={"key": "env", "value": env_name})
+            if not env_labels:
+                return [types.TextContent(type="text", text=json.dumps({"error": f"Env label '{env_name}' not found"}))]
+            env_label = env_labels[0]
+
+            # Get workloads for this app+env
+            workloads = pce.workloads.get(params={
+                "labels": json.dumps([app_label.href, env_label.href]),
+                "max_results": 10000,
+                "include": "labels"
+            })
+
+            # Analyze enforcement modes
+            enforcement_modes = {}
+            for w in workloads:
+                mode = getattr(w, 'enforcement_mode', 'unknown') or 'unknown'
+                enforcement_modes[mode] = enforcement_modes.get(mode, 0) + 1
+
+            # Query traffic flows
+            start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
+            app_filter = TrafficQueryFilter(label=Reference(href=app_label.href))
+            env_filter = TrafficQueryFilter(label=Reference(href=env_label.href))
+
+            # Inbound traffic
+            traffic_query = TrafficQuery.build(
+                start_date=start_date,
+                end_date=end_date,
+                include_sources=[[]],
+                include_destinations=[[app_filter, env_filter]],
+                policy_decisions=["allowed", "potentially_blocked", "blocked"],
+                max_results=MCP_BUG_MAX_RESULTS,
+                query_name='readiness-inbound'
+            )
+            inbound_flows = pce.get_traffic_flows_async(query_name='readiness-inbound', traffic_query=traffic_query)
+
+            # Outbound traffic
+            traffic_query_out = TrafficQuery.build(
+                start_date=start_date,
+                end_date=end_date,
+                include_sources=[[app_filter, env_filter]],
+                include_destinations=[[]],
+                policy_decisions=["allowed", "potentially_blocked", "blocked"],
+                max_results=MCP_BUG_MAX_RESULTS,
+                query_name='readiness-outbound'
+            )
+            outbound_flows = pce.get_traffic_flows_async(query_name='readiness-outbound', traffic_query=traffic_query_out)
+
+            inbound_df = to_dataframe(inbound_flows)
+            outbound_df = to_dataframe(outbound_flows)
+
+            # Analyze policy decisions
+            policy_stats = {"allowed": 0, "potentially_blocked": 0, "blocked": 0, "unknown": 0}
+            total_flows = 0
+
+            for df in [inbound_df, outbound_df]:
+                if not df.empty and 'policy_decision' in df.columns:
+                    for decision, count in df['policy_decision'].value_counts().items():
+                        policy_stats[decision] = policy_stats.get(decision, 0) + count
+                        total_flows += count
+
+            # Identify unique remote apps and their coverage
+            remote_apps_covered = set()
+            remote_apps_uncovered = set()
+
+            if not inbound_df.empty and 'src_app' in inbound_df.columns and 'src_env' in inbound_df.columns:
+                for _, row in inbound_df.iterrows():
+                    if pd.notna(row.get('src_app')) and pd.notna(row.get('src_env')):
+                        key = (row['src_app'], row['src_env'])
+                        if key == (app_name, env_name):
+                            continue
+                        if row.get('policy_decision') == 'allowed':
+                            remote_apps_covered.add(key)
+                        else:
+                            remote_apps_uncovered.add(key)
+
+            # Check for existing rulesets
+            rulesets = pce.rule_sets.get(params={"name": f"RF-{app_name}-{env_name}"})
+            has_ringfence = len(rulesets) > 0
+
+            # Calculate readiness score (0-100)
+            readiness_score = 0
+            recommendations = []
+
+            # Factor 1: Policy coverage (40 points)
+            if total_flows > 0:
+                coverage_ratio = policy_stats.get("allowed", 0) / total_flows
+                readiness_score += coverage_ratio * 40
+                if coverage_ratio < 0.5:
+                    recommendations.append("Less than 50% of traffic is covered by policy — create rules for observed traffic patterns")
+                elif coverage_ratio < 0.9:
+                    recommendations.append("Some traffic is not yet covered — review potentially_blocked flows and add rules")
+            else:
+                recommendations.append("No traffic flows found — verify workloads are online and sending data")
+
+            # Factor 2: Ringfence exists (20 points)
+            if has_ringfence:
+                readiness_score += 20
+            else:
+                recommendations.append("No ringfence ruleset found — run create-ringfence to create app-level segmentation")
+
+            # Factor 3: Enforcement mode (20 points)
+            if enforcement_modes.get('full', 0) == len(workloads) and len(workloads) > 0:
+                readiness_score += 20
+            elif enforcement_modes.get('selective', 0) > 0:
+                readiness_score += 10
+                recommendations.append("Some workloads in selective mode — consider moving to full enforcement after validation")
+            elif enforcement_modes.get('visibility_only', 0) > 0:
+                readiness_score += 5
+                recommendations.append("Workloads in visibility_only — move to selective or full enforcement when policies are ready")
+            else:
+                recommendations.append("No enforcement configured — start with visibility_only, then selective, then full")
+
+            # Factor 4: No blocked traffic (10 points)
+            if policy_stats.get("blocked", 0) == 0:
+                readiness_score += 10
+            else:
+                recommendations.append(f"{policy_stats['blocked']} flows are currently blocked — investigate if these are intentional or need new rules")
+
+            # Factor 5: All remote apps covered (10 points)
+            uncovered_only = remote_apps_uncovered - remote_apps_covered
+            if not uncovered_only:
+                readiness_score += 10
+            else:
+                recommendations.append(f"{len(uncovered_only)} remote apps have uncovered traffic — review and create allow rules")
+
+            readiness_score = round(readiness_score, 1)
+
+            if readiness_score >= 80:
+                readiness_level = "Ready for enforcement"
+            elif readiness_score >= 50:
+                readiness_level = "Partially ready — address recommendations"
+            else:
+                readiness_level = "Not ready — significant policy gaps"
+
+            result = {
+                "app": app_name,
+                "env": env_name,
+                "readiness_score": readiness_score,
+                "readiness_level": readiness_level,
+                "workloads": {
+                    "total": len(workloads),
+                    "enforcement_modes": enforcement_modes
+                },
+                "traffic_analysis": {
+                    "lookback_days": lookback_days,
+                    "total_flows": total_flows,
+                    "policy_decisions": policy_stats,
+                    "coverage_percentage": round((policy_stats.get("allowed", 0) / total_flows * 100) if total_flows > 0 else 0, 1)
+                },
+                "remote_apps": {
+                    "covered": [{"app": a, "env": e} for a, e in sorted(remote_apps_covered)],
+                    "uncovered": [{"app": a, "env": e} for a, e in sorted(uncovered_only)],
+                },
+                "has_ringfence": has_ringfence,
+                "recommendations": recommendations
+            }
+
+            return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to assess enforcement readiness: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "ringfence-batch":
+        logger.debug("=" * 80)
+        logger.debug("RINGFENCE BATCH CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            apps = arguments["apps"]
+            auto_order = arguments.get("auto_order", False)
+            dry_run = arguments.get("dry_run", False)
+            lookback_days = arguments.get("lookback_days", 30)
+
+            if auto_order:
+                # Use infrastructure identification to order apps
+                infra_result = await handle_call_tool("identify-infrastructure-services", {
+                    "lookback_days": lookback_days,
+                    "top_n": 1000
+                })
+                # Parse the result to build an ordering map
+                try:
+                    infra_data = json.loads(infra_result[0].text)
+                    score_map = {}
+                    for r in infra_data.get("results", []):
+                        score_map[(r["app"], r["env"])] = r["infrastructure_score"]
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    score_map = {}
+
+                # Sort apps: infrastructure (higher score) first
+                apps.sort(key=lambda a: score_map.get((a["app_name"], a["env_name"]), 0), reverse=True)
+
+            results = []
+            for app in apps:
+                rf_args = {
+                    "app_name": app["app_name"],
+                    "env_name": app["env_name"],
+                    "lookback_days": lookback_days,
+                    "dry_run": dry_run,
+                    "selective": app.get("selective", False)
+                }
+
+                try:
+                    rf_result = await handle_call_tool("create-ringfence", rf_args)
+                    result_data = json.loads(rf_result[0].text)
+                    results.append({
+                        "app": app["app_name"],
+                        "env": app["env_name"],
+                        "status": "success",
+                        "result": result_data
+                    })
+                except Exception as app_err:
+                    results.append({
+                        "app": app["app_name"],
+                        "env": app["env_name"],
+                        "status": "error",
+                        "error": str(app_err)
+                    })
+
+            success_count = sum(1 for r in results if r["status"] == "success")
+            error_count = sum(1 for r in results if r["status"] == "error")
+
+            output = {
+                "summary": {
+                    "total_apps": len(apps),
+                    "successful": success_count,
+                    "errors": error_count,
+                    "dry_run": dry_run,
+                    "auto_ordered": auto_order
+                },
+                "results": results
+            }
+
+            return [types.TextContent(type="text", text=json.dumps(output, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed batch ringfence: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "get-workload-enforcement-status":
+        logger.debug("=" * 80)
+        logger.debug("GET WORKLOAD ENFORCEMENT STATUS CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            params = {"include": "labels", "max_results": 10000}
+
+            # Build label filter if app/env specified
+            filter_labels = []
+            if arguments.get("app_name"):
+                app_labels = pce.labels.get(params={"key": "app", "value": arguments["app_name"]})
+                if app_labels:
+                    filter_labels.append(app_labels[0].href)
+            if arguments.get("env_name"):
+                env_labels = pce.labels.get(params={"key": "env", "value": arguments["env_name"]})
+                if env_labels:
+                    filter_labels.append(env_labels[0].href)
+            if filter_labels:
+                params["labels"] = json.dumps(filter_labels)
+
+            workloads = pce.workloads.get(params=params)
+
+            # Build label href map for resolution
+            label_href_map = {}
+            for l in pce.labels.get(params={'max_results': 10000}):
+                label_href_map[l.href] = {"key": l.key, "value": l.value}
+
+            # Group by app+env
+            app_env_groups = {}
+            for w in workloads:
+                app_val = None
+                env_val = None
+                if hasattr(w, 'labels') and w.labels:
+                    for l in w.labels:
+                        info = label_href_map.get(l.href, {})
+                        if info.get("key") == "app":
+                            app_val = info.get("value")
+                        elif info.get("key") == "env":
+                            env_val = info.get("value")
+
+                key = f"{app_val or 'unlabeled'}|{env_val or 'unlabeled'}"
+                if key not in app_env_groups:
+                    app_env_groups[key] = {"app": app_val, "env": env_val, "modes": {}, "workloads": []}
+
+                mode = getattr(w, 'enforcement_mode', 'unknown') or 'unknown'
+                app_env_groups[key]["modes"][mode] = app_env_groups[key]["modes"].get(mode, 0) + 1
+                app_env_groups[key]["workloads"].append({
+                    "name": w.name or w.hostname or "unnamed",
+                    "href": w.href,
+                    "enforcement_mode": mode,
+                    "online": getattr(w, 'online', None)
+                })
+
+            # Identify mixed enforcement states
+            mixed_apps = []
+            for key, group in app_env_groups.items():
+                if len(group["modes"]) > 1:
+                    mixed_apps.append({
+                        "app": group["app"],
+                        "env": group["env"],
+                        "modes": group["modes"]
+                    })
+
+            # Global mode summary
+            global_modes = {}
+            for w in workloads:
+                mode = getattr(w, 'enforcement_mode', 'unknown') or 'unknown'
+                global_modes[mode] = global_modes.get(mode, 0) + 1
+
+            # Format app groups (without individual workload details to keep output manageable)
+            app_summaries = []
+            for key, group in sorted(app_env_groups.items()):
+                app_summaries.append({
+                    "app": group["app"],
+                    "env": group["env"],
+                    "workload_count": sum(group["modes"].values()),
+                    "enforcement_modes": group["modes"],
+                    "is_mixed": len(group["modes"]) > 1
+                })
+
+            result = {
+                "total_workloads": len(workloads),
+                "global_enforcement_modes": global_modes,
+                "app_groups": app_summaries,
+                "mixed_enforcement_apps": mixed_apps,
+                "mixed_count": len(mixed_apps)
+            }
+
+            return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to get enforcement status: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "get-policy-coverage-report":
+        logger.debug("=" * 80)
+        logger.debug("GET POLICY COVERAGE REPORT CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            app_name = arguments["app_name"]
+            env_name = arguments["env_name"]
+            lookback_days = arguments.get("lookback_days", 30)
+
+            app_labels = pce.labels.get(params={"key": "app", "value": app_name})
+            if not app_labels:
+                return [types.TextContent(type="text", text=json.dumps({"error": f"App label '{app_name}' not found"}))]
+            app_label = app_labels[0]
+
+            env_labels = pce.labels.get(params={"key": "env", "value": env_name})
+            if not env_labels:
+                return [types.TextContent(type="text", text=json.dumps({"error": f"Env label '{env_name}' not found"}))]
+            env_label = env_labels[0]
+
+            start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
+            app_filter = TrafficQueryFilter(label=Reference(href=app_label.href))
+            env_filter = TrafficQueryFilter(label=Reference(href=env_label.href))
+
+            # Query inbound traffic with all policy decisions
+            traffic_query = TrafficQuery.build(
+                start_date=start_date,
+                end_date=end_date,
+                include_sources=[[]],
+                include_destinations=[[app_filter, env_filter]],
+                policy_decisions=["allowed", "potentially_blocked", "blocked"],
+                max_results=MCP_BUG_MAX_RESULTS,
+                query_name='coverage-inbound'
+            )
+            inbound_flows = pce.get_traffic_flows_async(query_name='coverage-inbound', traffic_query=traffic_query)
+
+            # Query outbound
+            traffic_query_out = TrafficQuery.build(
+                start_date=start_date,
+                end_date=end_date,
+                include_sources=[[app_filter, env_filter]],
+                include_destinations=[[]],
+                policy_decisions=["allowed", "potentially_blocked", "blocked"],
+                max_results=MCP_BUG_MAX_RESULTS,
+                query_name='coverage-outbound'
+            )
+            outbound_flows = pce.get_traffic_flows_async(query_name='coverage-outbound', traffic_query=traffic_query_out)
+
+            inbound_df = to_dataframe(inbound_flows)
+            outbound_df = to_dataframe(outbound_flows)
+
+            # Analyze by policy decision
+            def analyze_coverage(df, direction):
+                if df.empty:
+                    return {"total_flows": 0, "by_decision": {}, "uncovered_services": [], "uncovered_apps": []}
+
+                total = len(df)
+                by_decision = {}
+                if 'policy_decision' in df.columns:
+                    by_decision = df['policy_decision'].value_counts().to_dict()
+                    by_decision = {k: int(v) for k, v in by_decision.items()}
+
+                # Find uncovered (potentially_blocked or blocked) services
+                uncovered_services = []
+                uncovered_apps = []
+                if 'policy_decision' in df.columns:
+                    uncovered = df[df['policy_decision'].isin(['potentially_blocked', 'blocked'])]
+                    if not uncovered.empty:
+                        # Group by port/proto
+                        if 'port' in uncovered.columns and 'proto' in uncovered.columns:
+                            svc_group = uncovered.groupby(['port', 'proto'])['num_connections'].sum().reset_index()
+                            for _, row in svc_group.iterrows():
+                                uncovered_services.append({
+                                    "port": int(row['port']),
+                                    "proto": int(row['proto']),
+                                    "connections": int(row['num_connections'])
+                                })
+                        # Group by remote app
+                        remote_col = 'src_app' if direction == 'inbound' else 'dst_app'
+                        remote_env_col = 'src_env' if direction == 'inbound' else 'dst_env'
+                        if remote_col in uncovered.columns and remote_env_col in uncovered.columns:
+                            app_group = uncovered.groupby([remote_col, remote_env_col])['num_connections'].sum().reset_index()
+                            for _, row in app_group.iterrows():
+                                if pd.notna(row[remote_col]) and pd.notna(row[remote_env_col]):
+                                    uncovered_apps.append({
+                                        "app": row[remote_col],
+                                        "env": row[remote_env_col],
+                                        "connections": int(row['num_connections'])
+                                    })
+
+                covered = by_decision.get('allowed', 0)
+                return {
+                    "total_flows": total,
+                    "by_decision": by_decision,
+                    "coverage_percentage": round(covered / total * 100, 1) if total > 0 else 0,
+                    "uncovered_services": sorted(uncovered_services, key=lambda x: x['connections'], reverse=True),
+                    "uncovered_apps": sorted(uncovered_apps, key=lambda x: x['connections'], reverse=True)
+                }
+
+            inbound_coverage = analyze_coverage(inbound_df, 'inbound')
+            outbound_coverage = analyze_coverage(outbound_df, 'outbound')
+
+            total_flows = inbound_coverage["total_flows"] + outbound_coverage["total_flows"]
+            total_allowed = inbound_coverage["by_decision"].get("allowed", 0) + outbound_coverage["by_decision"].get("allowed", 0)
+            overall_coverage = round(total_allowed / total_flows * 100, 1) if total_flows > 0 else 0
+
+            result = {
+                "app": app_name,
+                "env": env_name,
+                "lookback_days": lookback_days,
+                "overall_coverage_percentage": overall_coverage,
+                "total_flows": total_flows,
+                "total_allowed": total_allowed,
+                "inbound": inbound_coverage,
+                "outbound": outbound_coverage,
+                "recommendation": (
+                    "Full coverage — ready for enforcement" if overall_coverage >= 95
+                    else "High coverage — review remaining gaps before enforcement" if overall_coverage >= 80
+                    else "Moderate coverage — create rules for uncovered traffic" if overall_coverage >= 50
+                    else "Low coverage — significant policy gaps exist, start with ringfencing"
+                )
+            }
+
+            return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to generate policy coverage report: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "find-unmanaged-traffic":
+        logger.debug("=" * 80)
+        logger.debug("FIND UNMANAGED TRAFFIC CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            lookback_days = arguments.get("lookback_days", 30)
+            direction = arguments.get("direction", "both")
+            min_connections = arguments.get("min_connections", 1)
+            top_n = arguments.get("top_n", 50)
+
+            start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
+            traffic_query = TrafficQuery.build(
+                start_date=start_date,
+                end_date=end_date,
+                policy_decisions=["allowed", "potentially_blocked", "blocked"],
+                max_results=MCP_BUG_MAX_RESULTS,
+                query_name='unmanaged-traffic'
+            )
+
+            flows = pce.get_traffic_flows_async(query_name='unmanaged-traffic', traffic_query=traffic_query)
+            df = to_dataframe(flows)
+
+            if df.empty:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "message": "No traffic flows found", "lookback_days": lookback_days
+                }, indent=2))]
+
+            results = {"unmanaged_sources": [], "unmanaged_destinations": []}
+
+            # Find traffic from unmanaged sources (no src_app label) to managed destinations
+            if direction in ("inbound", "both"):
+                if 'src_app' in df.columns and 'dst_app' in df.columns:
+                    unmanaged_src = df[df['src_app'].isna() & df['dst_app'].notna()].copy()
+                    if not unmanaged_src.empty:
+                        group_cols = ['src_ip']
+                        if 'dst_app' in unmanaged_src.columns:
+                            group_cols.append('dst_app')
+                        if 'dst_env' in unmanaged_src.columns:
+                            group_cols.append('dst_env')
+                        if 'port' in unmanaged_src.columns:
+                            group_cols.append('port')
+                        if 'proto' in unmanaged_src.columns:
+                            group_cols.append('proto')
+
+                        grouped = unmanaged_src.groupby(group_cols)['num_connections'].sum().reset_index()
+                        grouped = grouped[grouped['num_connections'] >= min_connections]
+                        grouped = grouped.sort_values('num_connections', ascending=False).head(top_n)
+
+                        for _, row in grouped.iterrows():
+                            entry = {
+                                "src_ip": row.get('src_ip', ''),
+                                "dst_app": row.get('dst_app', ''),
+                                "dst_env": row.get('dst_env', ''),
+                                "port": int(row['port']) if 'port' in row and pd.notna(row['port']) else None,
+                                "proto": int(row['proto']) if 'proto' in row and pd.notna(row['proto']) else None,
+                                "connections": int(row['num_connections'])
+                            }
+                            results["unmanaged_sources"].append(entry)
+
+            # Find traffic to unmanaged destinations (no dst_app label) from managed sources
+            if direction in ("outbound", "both"):
+                if 'src_app' in df.columns and 'dst_app' in df.columns:
+                    unmanaged_dst = df[df['dst_app'].isna() & df['src_app'].notna()].copy()
+                    if not unmanaged_dst.empty:
+                        group_cols = ['dst_ip']
+                        if 'src_app' in unmanaged_dst.columns:
+                            group_cols.append('src_app')
+                        if 'src_env' in unmanaged_dst.columns:
+                            group_cols.append('src_env')
+                        if 'port' in unmanaged_dst.columns:
+                            group_cols.append('port')
+                        if 'proto' in unmanaged_dst.columns:
+                            group_cols.append('proto')
+
+                        grouped = unmanaged_dst.groupby(group_cols)['num_connections'].sum().reset_index()
+                        grouped = grouped[grouped['num_connections'] >= min_connections]
+                        grouped = grouped.sort_values('num_connections', ascending=False).head(top_n)
+
+                        for _, row in grouped.iterrows():
+                            entry = {
+                                "dst_ip": row.get('dst_ip', ''),
+                                "src_app": row.get('src_app', ''),
+                                "src_env": row.get('src_env', ''),
+                                "port": int(row['port']) if 'port' in row and pd.notna(row['port']) else None,
+                                "proto": int(row['proto']) if 'proto' in row and pd.notna(row['proto']) else None,
+                                "connections": int(row['num_connections'])
+                            }
+                            results["unmanaged_destinations"].append(entry)
+
+            result = {
+                "lookback_days": lookback_days,
+                "direction_filter": direction,
+                "min_connections": min_connections,
+                "unmanaged_source_count": len(results["unmanaged_sources"]),
+                "unmanaged_destination_count": len(results["unmanaged_destinations"]),
+                "unmanaged_sources": results["unmanaged_sources"],
+                "unmanaged_destinations": results["unmanaged_destinations"],
+                "recommendation": (
+                    "Unmanaged traffic represents policy blind spots. Consider: "
+                    "1) Creating IP lists for known external services, "
+                    "2) Deploying VEN agents on unmanaged workloads, "
+                    "3) Adding rules for legitimate unmanaged traffic sources."
+                )
+            }
+
+            return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to find unmanaged traffic: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "detect-lateral-movement-paths":
+        logger.debug("=" * 80)
+        logger.debug("DETECT LATERAL MOVEMENT PATHS CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            from collections import defaultdict, deque
+
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            lookback_days = arguments.get("lookback_days", 30)
+            max_hops = arguments.get("max_hops", 4)
+            start_app = arguments.get("app_name")
+            start_env = arguments.get("env_name")
+
+            start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
+            traffic_query = TrafficQuery.build(
+                start_date=start_date,
+                end_date=end_date,
+                policy_decisions=["allowed", "potentially_blocked", "blocked"],
+                max_results=100000,
+                query_name='lateral-movement'
+            )
+
+            flows = pce.get_traffic_flows_async(query_name='lateral-movement', traffic_query=traffic_query)
+            df = to_dataframe(flows)
+
+            if df.empty or 'src_app' not in df.columns or 'dst_app' not in df.columns:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "message": "No labeled traffic flows found for lateral movement analysis",
+                    "lookback_days": lookback_days
+                }, indent=2))]
+
+            # Build directed graph
+            edges_df = df[['src_app', 'src_env', 'dst_app', 'dst_env', 'num_connections']].dropna().copy()
+            edges_df['src'] = edges_df['src_app'] + '|' + edges_df['src_env']
+            edges_df['dst'] = edges_df['dst_app'] + '|' + edges_df['dst_env']
+            edges_df = edges_df[edges_df['src'] != edges_df['dst']]
+
+            edge_agg = edges_df.groupby(['src', 'dst'])['num_connections'].sum().reset_index()
+
+            # Build adjacency list (directed)
+            adj = defaultdict(set)
+            for _, row in edge_agg.iterrows():
+                adj[row['src']].add(row['dst'])
+
+            all_nodes = sorted(set(edge_agg['src']) | set(edge_agg['dst']))
+
+            # Find bridge nodes (articulation points in undirected version)
+            # These are nodes whose removal disconnects the graph
+            undirected_adj = defaultdict(set)
+            for _, row in edge_agg.iterrows():
+                undirected_adj[row['src']].add(row['dst'])
+                undirected_adj[row['dst']].add(row['src'])
+
+            # Tarjan's bridge-finding algorithm
+            visited = set()
+            disc = {}
+            low = {}
+            parent = {}
+            bridges = []
+            articulation_points = set()
+            timer = [0]
+
+            def dfs_ap(u):
+                children = 0
+                visited.add(u)
+                disc[u] = low[u] = timer[0]
+                timer[0] += 1
+
+                for v in undirected_adj[u]:
+                    if v not in visited:
+                        children += 1
+                        parent[v] = u
+                        dfs_ap(v)
+                        low[u] = min(low[u], low[v])
+
+                        # u is an articulation point if:
+                        if parent.get(u) is None and children > 1:
+                            articulation_points.add(u)
+                        if parent.get(u) is not None and low[v] >= disc[u]:
+                            articulation_points.add(u)
+                    elif v != parent.get(u):
+                        low[u] = min(low[u], disc[v])
+
+            for node in all_nodes:
+                if node not in visited:
+                    parent[node] = None
+                    dfs_ap(node)
+
+            # BFS to find reachable paths from starting node(s)
+            paths_from_start = []
+            if start_app:
+                start_node = f"{start_app}|{start_env}" if start_env else None
+                if not start_node:
+                    # Find all envs for this app
+                    start_nodes = [n for n in all_nodes if n.startswith(f"{start_app}|")]
+                else:
+                    start_nodes = [start_node] if start_node in adj else []
+
+                for sn in start_nodes:
+                    # BFS up to max_hops
+                    queue = deque([(sn, [sn])])
+                    seen = {sn}
+                    while queue:
+                        current, path = queue.popleft()
+                        if len(path) > max_hops + 1:
+                            continue
+                        for neighbor in adj.get(current, []):
+                            if neighbor not in seen:
+                                new_path = path + [neighbor]
+                                paths_from_start.append(new_path)
+                                seen.add(neighbor)
+                                queue.append((neighbor, new_path))
+
+            # Compute reach (how many nodes each node can reach)
+            reach = {}
+            for node in all_nodes:
+                visited_bfs = set()
+                queue = deque([node])
+                visited_bfs.add(node)
+                while queue:
+                    current = queue.popleft()
+                    for neighbor in adj.get(current, []):
+                        if neighbor not in visited_bfs:
+                            visited_bfs.add(neighbor)
+                            queue.append(neighbor)
+                reach[node] = len(visited_bfs) - 1  # exclude self
+
+            # High-risk nodes: articulation points sorted by reach
+            high_risk_nodes = []
+            for node in sorted(articulation_points, key=lambda n: reach.get(n, 0), reverse=True):
+                app, env = node.split('|', 1)
+                high_risk_nodes.append({
+                    "app": app,
+                    "env": env,
+                    "is_articulation_point": True,
+                    "reachable_apps": reach.get(node, 0),
+                    "direct_connections_out": len(adj.get(node, [])),
+                    "direct_connections_in": sum(1 for n in all_nodes if node in adj.get(n, set()))
+                })
+
+            # Top reach nodes (even if not articulation points)
+            top_reach = []
+            for node in sorted(all_nodes, key=lambda n: reach.get(n, 0), reverse=True)[:20]:
+                app, env = node.split('|', 1)
+                top_reach.append({
+                    "app": app,
+                    "env": env,
+                    "reachable_apps": reach.get(node, 0),
+                    "is_bridge_node": node in articulation_points
+                })
+
+            result = {
+                "lookback_days": lookback_days,
+                "total_apps": len(all_nodes),
+                "total_edges": len(edge_agg),
+                "articulation_points": len(articulation_points),
+                "high_risk_bridge_nodes": high_risk_nodes[:10],
+                "top_reachable_nodes": top_reach,
+            }
+
+            if start_app:
+                result["paths_from"] = start_app + (f"|{start_env}" if start_env else "")
+                result["max_hops"] = max_hops
+                result["paths"] = [
+                    {"path": p, "hops": len(p) - 1}
+                    for p in sorted(paths_from_start, key=lambda x: len(x), reverse=True)[:50]
+                ]
+
+            result["recommendation"] = (
+                "Bridge nodes (articulation points) are critical lateral movement risks — "
+                "if compromised, they provide access to otherwise disconnected app groups. "
+                "Prioritize ringfencing these apps and applying strict segmentation policies. "
+                "Apps with high reachability should have minimal necessary connectivity."
+            )
+
+            return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to detect lateral movement paths: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "compliance-check":
+        logger.debug("=" * 80)
+        logger.debug("COMPLIANCE CHECK CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            framework = arguments.get("framework", "general")
+            app_name = arguments.get("app_name")
+            env_name = arguments.get("env_name")
+            lookback_days = arguments.get("lookback_days", 30)
+
+            # Define compliance checks per framework
+            framework_checks = {
+                "pci-dss": {
+                    "name": "PCI-DSS",
+                    "checks": [
+                        {"id": "PCI-1.3", "name": "Restrict inbound traffic to CDE", "description": "Inbound traffic to cardholder data environment must be explicitly allowed"},
+                        {"id": "PCI-1.4", "name": "Restrict outbound traffic from CDE", "description": "Outbound traffic from CDE must be explicitly authorized"},
+                        {"id": "PCI-2.1", "name": "No default passwords", "description": "Change vendor-supplied defaults (check for common admin ports)"},
+                        {"id": "PCI-6.1", "name": "Segment CDE from non-CDE", "description": "CDE must be segmented from non-CDE networks"},
+                        {"id": "PCI-7.1", "name": "Restrict access by business need", "description": "Limit access to system components to only those required"},
+                    ],
+                    "high_risk_ports": [3389, 22, 23, 445, 1433, 3306, 5432, 1521],
+                },
+                "nist": {
+                    "name": "NIST 800-53",
+                    "checks": [
+                        {"id": "AC-4", "name": "Information flow enforcement", "description": "Enforce approved authorizations for controlling information flow"},
+                        {"id": "SC-7", "name": "Boundary protection", "description": "Monitor and control communications at external boundaries and key internal boundaries"},
+                        {"id": "CM-7", "name": "Least functionality", "description": "Configure to provide only essential capabilities — no unnecessary ports or services"},
+                        {"id": "SI-4", "name": "System monitoring", "description": "Monitor for unauthorized network connections and traffic"},
+                    ],
+                    "high_risk_ports": [3389, 22, 23, 445, 135, 139, 1433, 3306, 5432],
+                },
+                "cis": {
+                    "name": "CIS Controls",
+                    "checks": [
+                        {"id": "CIS-9", "name": "Network access control", "description": "Manage network access control and micro-segmentation"},
+                        {"id": "CIS-12", "name": "Network infrastructure management", "description": "Establish network segmentation with security boundaries"},
+                        {"id": "CIS-13", "name": "Network monitoring and defense", "description": "Operate processes to detect network-based threats"},
+                    ],
+                    "high_risk_ports": [3389, 22, 23, 445, 135, 139, 21, 69],
+                },
+                "general": {
+                    "name": "General Security Best Practices",
+                    "checks": [
+                        {"id": "SEG-1", "name": "Application segmentation", "description": "Apps should have ringfence policies limiting lateral movement"},
+                        {"id": "SEG-2", "name": "Enforcement mode", "description": "Workloads should not be in idle or visibility_only mode in production"},
+                        {"id": "SEG-3", "name": "High-risk port exposure", "description": "Sensitive ports (RDP, SSH, DB) should have explicit allow rules only"},
+                        {"id": "SEG-4", "name": "Policy coverage", "description": "Traffic should be covered by explicit policy, not relying on default actions"},
+                    ],
+                    "high_risk_ports": [3389, 22, 23, 445, 135, 139, 1433, 3306, 5432, 1521, 27017, 6379, 9200],
+                },
+            }
+
+            fw = framework_checks.get(framework, framework_checks["general"])
+            high_risk_ports = fw["high_risk_ports"]
+
+            # Get workloads
+            params = {"include": "labels", "max_results": 10000}
+            filter_labels = []
+            if app_name:
+                app_labels = pce.labels.get(params={"key": "app", "value": app_name})
+                if app_labels:
+                    filter_labels.append(app_labels[0].href)
+            if env_name:
+                env_labels = pce.labels.get(params={"key": "env", "value": env_name})
+                if env_labels:
+                    filter_labels.append(env_labels[0].href)
+            if filter_labels:
+                params["labels"] = json.dumps(filter_labels)
+
+            workloads = pce.workloads.get(params=params)
+
+            # Build label map
+            label_href_map = {}
+            for l in pce.labels.get(params={'max_results': 10000}):
+                label_href_map[l.href] = {"key": l.key, "value": l.value}
+
+            # Analyze enforcement modes
+            enforcement_modes = {}
+            idle_workloads = []
+            vis_only_workloads = []
+            for w in workloads:
+                mode = getattr(w, 'enforcement_mode', 'unknown') or 'unknown'
+                enforcement_modes[mode] = enforcement_modes.get(mode, 0) + 1
+                if mode == 'idle':
+                    idle_workloads.append(w.name or w.hostname or w.href)
+                elif mode == 'visibility_only':
+                    vis_only_workloads.append(w.name or w.hostname or w.href)
+
+            # Query traffic
+            start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
+            query_kwargs = {
+                "start_date": start_date,
+                "end_date": end_date,
+                "policy_decisions": ["allowed", "potentially_blocked", "blocked"],
+                "max_results": MCP_BUG_MAX_RESULTS,
+                "query_name": "compliance-check"
+            }
+
+            if app_name and filter_labels:
+                filters = [TrafficQueryFilter(label=Reference(href=h)) for h in filter_labels]
+                query_kwargs["include_destinations"] = [filters]
+                query_kwargs["include_sources"] = [[]]
+            else:
+                pass  # Query all traffic
+
+            traffic_query = TrafficQuery.build(**query_kwargs)
+            flows = pce.get_traffic_flows_async(query_name='compliance-check', traffic_query=traffic_query)
+            df = to_dataframe(flows)
+
+            # Run compliance checks
+            findings = []
+            passed = 0
+            failed = 0
+            warnings = 0
+
+            for check in fw["checks"]:
+                finding = {"id": check["id"], "name": check["name"], "description": check["description"]}
+
+                if "segmentation" in check["name"].lower() or "ringfence" in check["name"].lower() or check["id"] in ("SEG-1", "PCI-6.1", "CIS-9", "CIS-12"):
+                    # Check if ringfence exists
+                    if app_name:
+                        rulesets = pce.rule_sets.get(params={"name": f"RF-{app_name}"})
+                        if rulesets:
+                            finding["status"] = "PASS"
+                            finding["detail"] = f"Ringfence ruleset found for {app_name}"
+                            passed += 1
+                        else:
+                            finding["status"] = "FAIL"
+                            finding["detail"] = f"No ringfence ruleset found for {app_name} — run create-ringfence"
+                            failed += 1
+                    else:
+                        # Check total rulesets
+                        all_rulesets = pce.rule_sets.get(params={"max_results": 1000})
+                        rf_count = sum(1 for rs in all_rulesets if rs.name and rs.name.startswith("RF-"))
+                        finding["status"] = "INFO"
+                        finding["detail"] = f"{rf_count} ringfence rulesets found out of {len(all_rulesets)} total rulesets"
+                        warnings += 1
+
+                elif "enforcement" in check["name"].lower() or check["id"] == "SEG-2":
+                    if idle_workloads:
+                        finding["status"] = "FAIL"
+                        finding["detail"] = f"{len(idle_workloads)} workloads in idle mode: {idle_workloads[:5]}"
+                        failed += 1
+                    elif vis_only_workloads and env_name and env_name.lower() in ('production', 'prod'):
+                        finding["status"] = "WARNING"
+                        finding["detail"] = f"{len(vis_only_workloads)} production workloads in visibility_only mode"
+                        warnings += 1
+                    else:
+                        finding["status"] = "PASS"
+                        finding["detail"] = f"All {len(workloads)} workloads have appropriate enforcement modes"
+                        passed += 1
+
+                elif "high-risk" in check["name"].lower() or "port" in check["name"].lower() or check["id"] in ("SEG-3", "PCI-2.1"):
+                    if not df.empty and 'port' in df.columns:
+                        exposed_high_risk = df[df['port'].isin(high_risk_ports)]
+                        if not exposed_high_risk.empty:
+                            uncovered = exposed_high_risk[exposed_high_risk.get('policy_decision', pd.Series()) != 'allowed'] if 'policy_decision' in exposed_high_risk.columns else pd.DataFrame()
+                            ports_found = sorted(exposed_high_risk['port'].unique().tolist())
+                            if not uncovered.empty:
+                                finding["status"] = "FAIL"
+                                finding["detail"] = f"High-risk ports with uncovered traffic: {ports_found}"
+                                failed += 1
+                            else:
+                                finding["status"] = "PASS"
+                                finding["detail"] = f"High-risk ports {ports_found} are all covered by policy"
+                                passed += 1
+                        else:
+                            finding["status"] = "PASS"
+                            finding["detail"] = "No high-risk port traffic detected"
+                            passed += 1
+                    else:
+                        finding["status"] = "INFO"
+                        finding["detail"] = "No traffic data available for port analysis"
+                        warnings += 1
+
+                elif "coverage" in check["name"].lower() or "flow" in check["name"].lower() or check["id"] in ("SEG-4", "AC-4", "SC-7"):
+                    if not df.empty and 'policy_decision' in df.columns:
+                        total = len(df)
+                        allowed = len(df[df['policy_decision'] == 'allowed'])
+                        coverage_pct = round(allowed / total * 100, 1) if total > 0 else 0
+                        if coverage_pct >= 90:
+                            finding["status"] = "PASS"
+                            finding["detail"] = f"{coverage_pct}% of traffic covered by policy ({allowed}/{total} flows)"
+                            passed += 1
+                        elif coverage_pct >= 50:
+                            finding["status"] = "WARNING"
+                            finding["detail"] = f"Only {coverage_pct}% of traffic covered ({allowed}/{total} flows)"
+                            warnings += 1
+                        else:
+                            finding["status"] = "FAIL"
+                            finding["detail"] = f"Only {coverage_pct}% of traffic covered ({allowed}/{total} flows) — significant policy gaps"
+                            failed += 1
+                    else:
+                        finding["status"] = "INFO"
+                        finding["detail"] = "No traffic data available for coverage analysis"
+                        warnings += 1
+
+                else:
+                    # Default: check traffic patterns
+                    if not df.empty and 'policy_decision' in df.columns:
+                        blocked = len(df[df['policy_decision'] == 'blocked'])
+                        pot_blocked = len(df[df['policy_decision'] == 'potentially_blocked'])
+                        if blocked > 0:
+                            finding["status"] = "WARNING"
+                            finding["detail"] = f"{blocked} blocked and {pot_blocked} potentially blocked flows detected"
+                            warnings += 1
+                        else:
+                            finding["status"] = "PASS"
+                            finding["detail"] = "No blocked traffic detected"
+                            passed += 1
+                    else:
+                        finding["status"] = "INFO"
+                        finding["detail"] = "No traffic data for analysis"
+                        warnings += 1
+
+                findings.append(finding)
+
+            total_checks = passed + failed + warnings
+            compliance_score = round(passed / total_checks * 100, 1) if total_checks > 0 else 0
+
+            result = {
+                "framework": fw["name"],
+                "scope": {
+                    "app": app_name or "all",
+                    "env": env_name or "all",
+                    "lookback_days": lookback_days
+                },
+                "compliance_score": compliance_score,
+                "summary": {
+                    "total_checks": total_checks,
+                    "passed": passed,
+                    "failed": failed,
+                    "warnings": warnings
+                },
+                "workloads_analyzed": len(workloads),
+                "enforcement_modes": enforcement_modes,
+                "findings": findings,
+                "recommendation": (
+                    "Compliant — maintain current policies" if compliance_score >= 90
+                    else "Mostly compliant — address failed checks" if compliance_score >= 70
+                    else "Significant gaps — prioritize failed findings" if compliance_score >= 40
+                    else "Major compliance gaps — immediate remediation needed"
+                )
+            }
+
+            return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to run compliance check: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 

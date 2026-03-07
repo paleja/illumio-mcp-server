@@ -65,6 +65,15 @@ class TestToolListing:
                     "get-events",
                     "create-ringfence",
                     "identify-infrastructure-services",
+                    "provision-policy",
+                    "compare-draft-active",
+                    "enforcement-readiness",
+                    "ringfence-batch",
+                    "get-workload-enforcement-status",
+                    "get-policy-coverage-report",
+                    "find-unmanaged-traffic",
+                    "detect-lateral-movement-paths",
+                    "compliance-check",
                 ])
                 assert len(tool_names) == len(expected), \
                     f"Tool count mismatch: got {len(tool_names)}, expected {len(expected)}. Extra: {set(tool_names) - set(expected)}, Missing: {set(expected) - set(tool_names)}"

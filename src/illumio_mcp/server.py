@@ -3230,11 +3230,27 @@ async def handle_call_tool(
                 ratio_score = consumer_ratio * 100
                 conn_score = (total_connections / max_conn) * 100 if max_conn > 0 else 0
 
-                # Weighted: in-degree 40%, betweenness 25%, consumer_ratio 25%, volume 10%
-                infra_score = round(
-                    (in_deg_score * 0.40) + (between_score * 0.25) +
-                    (ratio_score * 0.25) + (conn_score * 0.10), 1
+                # Weighted: in-degree 40%, consumer_ratio 30%, betweenness 25%, volume 5%
+                infra_score = (
+                    (in_deg_score * 0.40) + (ratio_score * 0.30) +
+                    (between_score * 0.25) + (conn_score * 0.05)
                 )
+
+                # Out-degree dampening: infrastructure services are purely consumed,
+                # they don't reach out to other apps. Each outbound edge reduces the
+                # score. Formula: score *= 1 / (1 + out_degree * 0.3)
+                if out_degree[node] > 0:
+                    infra_score *= 1.0 / (1 + out_degree[node] * 0.3)
+
+                # Environment penalty: infrastructure services live in prod.
+                # Non-production environments get a 50% score reduction.
+                app, env = node.split('|', 1)
+                env_lower = env.lower()
+                is_prod = env_lower in ('prod', 'production')
+                if not is_prod:
+                    infra_score *= 0.5
+
+                infra_score = round(infra_score, 1)
 
                 if infra_score >= 75:
                     tier = "Core Infrastructure"
@@ -3243,10 +3259,10 @@ async def handle_call_tool(
                 else:
                     tier = "Standard Application"
 
-                app, env = node.split('|', 1)
                 results.append({
                     "app": app,
                     "env": env,
+                    "is_production": is_prod,
                     "infrastructure_score": infra_score,
                     "tier": tier,
                     "in_degree": in_degree[node],
@@ -3287,9 +3303,13 @@ async def handle_call_tool(
                     "scoring_methodology": (
                         "Infrastructure score (0-100) = "
                         "40% in-degree centrality (how many apps connect to this service) + "
+                        "30% consumer ratio (in-degree / total degree, 1.0 = pure provider) + "
                         "25% betweenness centrality (how often this sits on paths between other apps) + "
-                        "25% consumer ratio (in-degree / total degree, 1.0 = pure provider) + "
-                        "10% connection volume. "
+                        "5% connection volume. "
+                        "Out-degree dampening: score *= 1/(1 + out_degree * 0.3) — "
+                        "infrastructure is purely consumed, each outbound edge reduces the score. "
+                        "Non-production environments (staging, dev, etc.) receive a 50% score penalty "
+                        "since infrastructure services typically live in production. "
                         "Core Infrastructure >= 75, Shared Service >= 50, Standard Application < 50."
                     ),
                     "recommendation": (

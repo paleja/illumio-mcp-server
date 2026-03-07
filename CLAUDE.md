@@ -33,9 +33,11 @@ Illumio writes deny rules to the **source workload** (consumer side). The `deny_
 Infrastructure services (DNS, AD, NTP, logging, shared databases) are consumed by many apps and should be policy'd first during segmentation rollouts. The `identify-infrastructure-services` tool builds an app-to-app communication graph from traffic flows and computes:
 
 - **In-degree centrality** (40% weight): How many distinct apps connect TO this service
+- **Consumer ratio** (30% weight): in-degree / total-degree. 1.0 = pure provider (classic infra), 0.0 = pure consumer
 - **Betweenness centrality** (25% weight): How often this node sits on shortest paths between other apps
-- **Consumer ratio** (25% weight): in-degree / total-degree. 1.0 = pure provider (classic infra), 0.0 = pure consumer
-- **Connection volume** (10% weight): Total connections as tiebreaker
+- **Connection volume** (5% weight): Total connections as tiebreaker
+- **Out-degree dampening**: `score *= 1 / (1 + out_degree * 0.3)` — infrastructure is purely consumed, each outbound edge reduces the score
+- **Environment penalty**: Non-production environments (staging, dev, etc.) get a 50% score reduction — infrastructure services live in prod
 
 Classification tiers: Core Infrastructure (>= 75), Shared Service (>= 50), Standard Application (< 50).
 

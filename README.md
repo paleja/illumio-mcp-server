@@ -132,9 +132,13 @@ Add the following to the `custom_settings` section:
   | Metric | Weight | What it measures |
   |---|---|---|
   | In-degree centrality | 40% | How many distinct apps connect TO this service |
+  | Consumer ratio | 30% | in-degree / total-degree (1.0 = pure provider, 0.0 = pure consumer) |
   | Betweenness centrality | 25% | How often this node sits on shortest paths between other apps |
-  | Consumer ratio | 25% | in-degree / total-degree (1.0 = pure provider, 0.0 = pure consumer) |
-  | Connection volume | 10% | Total connections as tiebreaker |
+  | Connection volume | 5% | Total connections as tiebreaker |
+
+  **Out-degree dampening:** `score *= 1 / (1 + out_degree * 0.3)` — infrastructure services are purely consumed. Each outbound edge (consuming another app) reduces the score, so business apps that happen to have many inbound connections don't get misclassified.
+
+  Non-production environments (staging, dev, etc.) receive a **50% score penalty** since infrastructure services typically live in production.
 
   Apps are classified into tiers:
   - **Core Infrastructure** (score >= 75) — DNS, AD, NTP, logging. Policy these first.

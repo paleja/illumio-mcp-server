@@ -3214,8 +3214,11 @@ async def handle_call_tool(
                 unmanaged_df['dst'] = unmanaged_df['dst_app'] + '|' + unmanaged_df['dst_env']
                 unmanaged_in = unmanaged_df.groupby('dst')['src_ip'].nunique().to_dict()
 
-            # Compute composite infrastructure score
+            # Compute dual-pattern infrastructure score.
+            # Two types of infra: providers (high in-degree) and consumers (high out-degree).
+            # Compute both pattern scores, take the max, then apply dampening + env penalty.
             max_in = max(in_degree.values()) if in_degree else 1
+            max_out = max(out_degree.values()) if out_degree else 1
             max_between = max(betweenness.values()) if betweenness else 1
             max_conn = max(in_conn[n] + out_conn[n] for n in all_nodes) if all_nodes else 1
 
@@ -3223,24 +3226,35 @@ async def handle_call_tool(
             for node in all_nodes:
                 total_deg = in_degree[node] + out_degree[node]
                 consumer_ratio = in_degree[node] / total_deg if total_deg > 0 else 0
+                producer_ratio = 1.0 - consumer_ratio
                 total_connections = in_conn[node] + out_conn[node]
 
                 in_deg_score = (in_degree[node] / max_in) * 100 if max_in > 0 else 0
+                out_deg_score = (out_degree[node] / max_out) * 100 if max_out > 0 else 0
                 between_score = (betweenness[node] / max_between) * 100 if max_between > 0 else 0
-                ratio_score = consumer_ratio * 100
                 conn_score = (total_connections / max_conn) * 100 if max_conn > 0 else 0
 
-                # Weighted: in-degree 40%, consumer_ratio 30%, betweenness 25%, volume 5%
-                infra_score = (
-                    (in_deg_score * 0.40) + (ratio_score * 0.30) +
+                # Provider pattern: consumed by many apps (AD, DNS, shared DB)
+                provider_score = (
+                    (in_deg_score * 0.40) + (consumer_ratio * 100 * 0.30) +
                     (between_score * 0.25) + (conn_score * 0.05)
                 )
 
-                # Out-degree dampening: infrastructure services are purely consumed,
-                # they don't reach out to other apps. Each outbound edge reduces the
-                # score. Formula: score *= 1 / (1 + out_degree * 0.3)
-                if out_degree[node] > 0:
-                    infra_score *= 1.0 / (1 + out_degree[node] * 0.3)
+                # Consumer pattern: connects out to many apps (monitoring, backup)
+                consumer_score = (
+                    (out_deg_score * 0.40) + (producer_ratio * 100 * 0.30) +
+                    (between_score * 0.25) + (conn_score * 0.05)
+                )
+
+                infra_score = max(provider_score, consumer_score)
+                dominant_pattern = "provider" if provider_score >= consumer_score else "consumer"
+
+                # Mixed-traffic dampening: apps with both inbound AND outbound
+                # connections are likely business apps, not infrastructure.
+                # Only applies when min(in, out) > 0.
+                mixed_degree = min(in_degree[node], out_degree[node])
+                if mixed_degree > 0:
+                    infra_score *= 1.0 / (1 + mixed_degree * 0.3)
 
                 # Environment penalty: infrastructure services live in prod.
                 # Non-production environments get a 50% score reduction.
@@ -3265,6 +3279,7 @@ async def handle_call_tool(
                     "is_production": is_prod,
                     "infrastructure_score": infra_score,
                     "tier": tier,
+                    "dominant_pattern": dominant_pattern,
                     "in_degree": in_degree[node],
                     "out_degree": out_degree[node],
                     "betweenness_centrality": round(betweenness[node], 4),
@@ -3301,15 +3316,15 @@ async def handle_call_tool(
                         "standard_application": standard_count
                     },
                     "scoring_methodology": (
-                        "Infrastructure score (0-100) = "
-                        "40% in-degree centrality (how many apps connect to this service) + "
-                        "30% consumer ratio (in-degree / total degree, 1.0 = pure provider) + "
-                        "25% betweenness centrality (how often this sits on paths between other apps) + "
-                        "5% connection volume. "
-                        "Out-degree dampening: score *= 1/(1 + out_degree * 0.3) — "
-                        "infrastructure is purely consumed, each outbound edge reduces the score. "
-                        "Non-production environments (staging, dev, etc.) receive a 50% score penalty "
-                        "since infrastructure services typically live in production. "
+                        "Dual-pattern scoring recognizes two types of infrastructure: "
+                        "PROVIDER (AD, DNS, shared DB — consumed by many apps, high in-degree) and "
+                        "CONSUMER (monitoring, backup — connects out to many apps, high out-degree). "
+                        "Provider score = 40% in-degree + 30% consumer ratio + 25% betweenness + 5% volume. "
+                        "Consumer score = 40% out-degree + 30% producer ratio + 25% betweenness + 5% volume. "
+                        "Final score = max(provider, consumer). "
+                        "Mixed-traffic dampening: score *= 1/(1 + min(in,out) * 0.3) — "
+                        "apps with both significant in AND out connections are business apps, not infra. "
+                        "Non-production environments receive a 50% score penalty. "
                         "Core Infrastructure >= 75, Shared Service >= 50, Standard Application < 50."
                     ),
                     "recommendation": (

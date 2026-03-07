@@ -127,25 +127,30 @@ Add the following to the `custom_settings` section:
   - **Dry-run support** — preview what would be created without making changes
 
 ### Infrastructure Service Identification
-- `identify-infrastructure-services` — **Discover which apps are infrastructure services** by analyzing traffic patterns. Builds an app-to-app communication graph and ranks apps using:
+- `identify-infrastructure-services` — **Discover which apps are infrastructure services** by analyzing traffic patterns. Builds an app-to-app communication graph and uses **dual-pattern scoring** to recognize two types of infrastructure:
 
-  | Metric | Weight | What it measures |
-  |---|---|---|
-  | In-degree centrality | 40% | How many distinct apps connect TO this service |
-  | Consumer ratio | 30% | in-degree / total-degree (1.0 = pure provider, 0.0 = pure consumer) |
-  | Betweenness centrality | 25% | How often this node sits on shortest paths between other apps |
-  | Connection volume | 5% | Total connections as tiebreaker |
+  **Provider infra** (AD, DNS, shared DB) — consumed by many apps, high in-degree, low out-degree.
+  **Consumer infra** (monitoring, backup, log shipping) — connects out to many apps, high out-degree, low in-degree.
 
-  **Out-degree dampening:** `score *= 1 / (1 + out_degree * 0.3)` — infrastructure services are purely consumed. Each outbound edge (consuming another app) reduces the score, so business apps that happen to have many inbound connections don't get misclassified.
+  Two scores are computed per app, and the higher one wins:
+
+  | Score | Degree metric (40%) | Directionality (30%) | Betweenness (25%) | Volume (5%) |
+  |---|---|---|---|---|
+  | **Provider** | In-degree | Consumer ratio (in/total) | Betweenness centrality | Connection volume |
+  | **Consumer** | Out-degree | Producer ratio (out/total) | Betweenness centrality | Connection volume |
+
+  **Mixed-traffic dampening:** `score *= 1 / (1 + min(in_degree, out_degree) * 0.3)` — apps with both significant inbound AND outbound connections are business apps, not infrastructure. Pure directional apps (all in OR all out) get no penalty.
 
   Non-production environments (staging, dev, etc.) receive a **50% score penalty** since infrastructure services typically live in production.
 
   Apps are classified into tiers:
-  - **Core Infrastructure** (score >= 75) — DNS, AD, NTP, logging. Policy these first.
+  - **Core Infrastructure** (score >= 75) — monitoring, AD, SIEM, DNS. Policy these first.
   - **Shared Service** (score >= 50) — shared databases, message queues. Policy these second.
   - **Standard Application** (score < 50) — normal business apps.
 
-  **Why this matters:** Infrastructure services are consumed by many apps. If you ringfence apps without allowing infrastructure services first, you break dependencies. This tool tells you what to policy first.
+  Each result includes a `dominant_pattern` field ("provider" or "consumer") indicating which type of infrastructure the app resembles.
+
+  **Why this matters:** Infrastructure services are consumed by many apps OR connect out to many apps. If you ringfence apps without allowing infrastructure services first, you break dependencies. This tool tells you what to policy first.
 
 ### Event Monitoring
 - `get-events` — Get PCE events with optional filtering by event type, severity, status, and result limits

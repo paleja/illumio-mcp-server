@@ -30,18 +30,21 @@ Illumio writes deny rules to the **source workload** (consumer side). The `deny_
 
 ## Infrastructure Service Identification
 
-Infrastructure services (DNS, AD, NTP, logging, shared databases) are consumed by many apps and should be policy'd first during segmentation rollouts. The `identify-infrastructure-services` tool builds an app-to-app communication graph from traffic flows and computes:
+Infrastructure services should be policy'd first during segmentation rollouts. The `identify-infrastructure-services` tool builds an app-to-app communication graph from traffic flows and uses **dual-pattern scoring** to recognize two types of infrastructure:
 
-- **In-degree centrality** (40% weight): How many distinct apps connect TO this service
-- **Consumer ratio** (30% weight): in-degree / total-degree. 1.0 = pure provider (classic infra), 0.0 = pure consumer
-- **Betweenness centrality** (25% weight): How often this node sits on shortest paths between other apps
-- **Connection volume** (5% weight): Total connections as tiebreaker
-- **Out-degree dampening**: `score *= 1 / (1 + out_degree * 0.3)` — infrastructure is purely consumed, each outbound edge reduces the score
-- **Environment penalty**: Non-production environments (staging, dev, etc.) get a 50% score reduction — infrastructure services live in prod
+- **Provider infra** (AD, DNS, shared DB) — consumed by many apps, high in-degree, low out-degree
+- **Consumer infra** (monitoring, backup, log shipping) — connects out to many apps, high out-degree, low in-degree
+
+**Scoring model:**
+- **Provider score** = 40% in-degree centrality + 30% consumer ratio + 25% betweenness + 5% volume
+- **Consumer score** = 40% out-degree centrality + 30% producer ratio + 25% betweenness + 5% volume
+- **Final score** = max(provider, consumer)
+- **Mixed-traffic dampening**: `score *= 1 / (1 + min(in, out) * 0.3)` — apps with both significant in AND out connections are business apps, not infra
+- **Environment penalty**: Non-production environments get a 50% score reduction
 
 Classification tiers: Core Infrastructure (>= 75), Shared Service (>= 50), Standard Application (< 50).
 
-Key insight: infrastructure services are almost exclusively *consumed* (consumer_ratio near 1.0) while endpoints and monitoring tools are *consumers* (ratio near 0.0).
+Key insight: infrastructure services have **strongly directional** traffic (either mostly inbound OR mostly outbound). Business apps have mixed bidirectional traffic.
 
 ## PCE API Notes
 

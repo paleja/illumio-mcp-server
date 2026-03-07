@@ -2,7 +2,7 @@
 
 # Illumio MCP Server
 
-A Model Context Protocol (MCP) server that provides an interface to interact with Illumio PCE (Policy Compute Engine). This server enables programmatic access to Illumio workload management, label operations, and traffic flow analysis.
+A Model Context Protocol (MCP) server that provides an interface to interact with Illumio PCE (Policy Compute Engine). This server enables programmatic access to Illumio workload management, label operations, traffic flow analysis, automated ringfencing, and infrastructure service identification.
 
 <a href="https://glama.ai/mcp/servers/xhqzxlo9iy">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/xhqzxlo9iy/badge" alt="Illumio Server MCP server" />
@@ -12,10 +12,14 @@ A Model Context Protocol (MCP) server that provides an interface to interact wit
 
 Use conversational AI to talk to your PCE:
 
-- Create, update and delete workloads
-- Create, update and delete labels
-- Get traffic summaries and do security analysis on them
-- Get PCE health
+- **Full CRUD** on workloads, labels, IP lists, services, and rulesets
+- **Traffic analysis** — query flows, get summaries, filter by policy decision
+- **Automated ringfencing** — analyze traffic and create app-to-app segmentation policies with one command
+- **Selective enforcement** — add deny rules for apps in selective mode with configurable consumer flavors
+- **Infrastructure service identification** — discover which apps are infrastructure services using graph centrality analysis, so you know what to policy first
+- **Deny rule management** — create, update, and delete deny rules (including override deny for emergencies)
+- **Event monitoring** — query PCE events with severity and type filters
+- **PCE health checks** — verify connectivity and credentials
 
 ## Prerequisites
 
@@ -28,14 +32,14 @@ Use conversational AI to talk to your PCE:
 1. Clone the repository:
 
 ```bash
-git clone [repository-url]
-cd illumio-mcp
+git clone https://github.com/alexgoller/illumio-mcp-server.git
+cd illumio-mcp-server
 ```
 
 2. Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ## Configuration
@@ -55,14 +59,14 @@ Add the following to the `custom_settings` section:
       "command": "uv",
       "args": [
         "--directory",
-        "/Users/alex.goller/git/illumio-mcp",
+        "/path/to/illumio-mcp-server",
         "run",
         "illumio-mcp"
       ],
       "env": {
         "PCE_HOST": "your-pce-host",
         "PCE_PORT": "your-pce-port",
-        "PCE_ORG_ID": "1", # your org id
+        "PCE_ORG_ID": "1",
         "API_KEY": "api_key",
         "API_SECRET": "api_secret"
       }
@@ -71,104 +75,121 @@ Add the following to the `custom_settings` section:
 }
 ```
 
-## Features
+## Tools
 
-### Resources
+### Workload Management
+- `get-workloads` — Retrieve workloads with optional filtering by name, hostname, IP, labels, and max results
+- `create-workload` — Create an unmanaged workload with name, IP addresses, and labels
+- `update-workload` — Update an existing workload's properties
+- `delete-workload` — Remove a workload from PCE
 
-Resources are not finished yet and I will look into that later.
+### Label Operations
+- `get-labels` — Retrieve labels with optional filtering by key, value, and max results
+- `create-label` — Create a new label with key-value pair
+- `update-label` — Update an existing label
+- `delete-label` — Remove a label
 
-- `illumio://workloads` - Get workloads from the PCE
-- `illumio://labels` - Get all labels from PCE
+### Ruleset & Rule Management
+- `get-rulesets` — Get rulesets with optional filtering by name, description, and enabled status
+- `create-ruleset` — Create a new ruleset with scopes
+- `update-ruleset` — Update ruleset properties
+- `delete-ruleset` — Remove a ruleset
+- `create-deny-rule` — Create a deny rule (regular or override deny) in a ruleset
+- `update-deny-rule` — Update an existing deny rule
+- `delete-deny-rule` — Remove a deny rule
 
-### Tools
+### IP List Management
+- `get-iplists` — Get IP lists with optional filtering by name, description, FQDN, and max results
+- `create-iplist` — Create a new IP list
+- `update-iplist` — Update an existing IP list
+- `delete-iplist` — Remove an IP list
 
-#### Workload Management
-- `get-workloads` - Retrieve all workloads from PCE
-- `create-workload` - Create an unmanaged workload with specified name, IP addresses, and labels
-- `update-workload` - Update an existing workload's properties
-- `delete-workload` - Remove a workload from PCE by name
+### Service Management
+- `get-services` — Get services with optional filtering by name, port, protocol, and max results
+- `create-service` — Create a new service definition
+- `update-service` — Update an existing service
+- `delete-service` — Remove a service
 
-#### Label Operations
-- `create-label` - Create a new label with key-value pair
-- `delete-label` - Remove an existing label by key-value pair
-- `get-labels` - Retrieve all labels from PCE
+### Traffic Analysis
+- `get-traffic-flows` — Get detailed traffic flow data with filtering by date range, source/destination, service, policy decision, and more
+- `get-traffic-flows-summary` — Get aggregated traffic summaries grouped by app, env, port, and protocol
 
-#### Traffic Analysis
-- `get-traffic-flows` - Get detailed traffic flow data with comprehensive filtering options:
-  - Date range filtering
-  - Source/destination filtering
-  - Service (port/protocol) filtering
-  - Policy decision filtering
-  - Workload and IP list query options
-  - Results limiting
-  
-- `get-traffic-flows-summary` - Get summarized traffic flow information with the same filtering capabilities as get-traffic-flows
+### Automated Ringfencing
+- `create-ringfence` — **Automated app-to-app segmentation policy creation.** Analyzes traffic flows to discover which remote apps communicate with a target app, then creates a ruleset with:
+  - **Intra-scope allow rule** — all workloads within the app can communicate freely
+  - **Extra-scope allow rules** — each discovered remote app gets an allow rule on All Services
+  - **Selective enforcement mode** (`selective=true`) — adds a deny rule blocking all inbound, with allow rules for known apps processed first. Gets you to enforcement faster than full enforcement mode.
+  - **Deny consumer flavors** (`deny_consumer` parameter):
+    - `any` (default) — IP list Any (0.0.0.0/0) as consumer, deny only at destination. Safest.
+    - `ams` — All Workloads as consumer, deny pushed to every managed workload. Broader.
+    - `ams_and_any` — Both. Maximum coverage.
+  - **Merge-safe** — detects existing rulesets and rules, never creates duplicates
+  - **Dry-run support** — preview what would be created without making changes
 
-#### Policy Management
-- `get-rulesets` - Get rulesets from the PCE with optional filtering:
-  - Filter by name
-  - Filter by enabled status
+### Infrastructure Service Identification
+- `identify-infrastructure-services` — **Discover which apps are infrastructure services** by analyzing traffic patterns. Builds an app-to-app communication graph and ranks apps using:
 
-#### IP Lists Management
-- `get-iplists` - Get IP lists from the PCE with optional filtering:
-  - Filter by name
-  - Filter by description
-  - Filter by IP ranges
+  | Metric | Weight | What it measures |
+  |---|---|---|
+  | In-degree centrality | 40% | How many distinct apps connect TO this service |
+  | Betweenness centrality | 25% | How often this node sits on shortest paths between other apps |
+  | Consumer ratio | 25% | in-degree / total-degree (1.0 = pure provider, 0.0 = pure consumer) |
+  | Connection volume | 10% | Total connections as tiebreaker |
 
-#### Connection Testing
-- `check-pce-connection` - Verify PCE connectivity and credentials
+  Apps are classified into tiers:
+  - **Core Infrastructure** (score >= 75) — DNS, AD, NTP, logging. Policy these first.
+  - **Shared Service** (score >= 50) — shared databases, message queues. Policy these second.
+  - **Standard Application** (score < 50) — normal business apps.
 
-#### Event Management
-- `get-events` - Get events from the PCE with optional filtering:
-  - Filter by event type (e.g., 'system_task.expire_service_account_api_keys')
-  - Filter by severity (emerg, alert, crit, err, warning, notice, info, debug)
-  - Filter by status (success, failure)
-  - Limit number of results returned
+  **Why this matters:** Infrastructure services are consumed by many apps. If you ringfence apps without allowing infrastructure services first, you break dependencies. This tool tells you what to policy first.
 
-## Error Handling
+### Event Monitoring
+- `get-events` — Get PCE events with optional filtering by event type, severity, status, and result limits
 
-The server implements comprehensive error handling and logging:
-- PCE connection issues
-- API authentication failures
-- Resource creation/update failures
-- Invalid input validation
+### Connection Testing
+- `check-pce-connection` — Verify PCE connectivity and credentials
 
-All errors are logged with full stack traces and returned as formatted error messages to the client.
+## Testing
 
-## Development
-
-### Running Tests
-
-Testing is not implemented yet.
+The project includes a comprehensive integration test suite that runs against a real PCE using the MCP protocol.
 
 ```bash
-python -m pytest tests/
+# Set up credentials in .env
+cat > .env << EOF
+PCE_HOST=your-pce-host
+PCE_PORT=8443
+PCE_ORG_ID=1
+API_KEY=your-api-key
+API_SECRET=your-api-secret
+EOF
+
+# Run all tests
+uv run pytest tests/ -v
 ```
 
-### Debug Mode
-Set logging level to DEBUG in the code or environment for detailed operation logs.
+The test suite covers:
+- Tool listing and schema validation
+- Full CRUD lifecycle for workloads, labels, IP lists, services, rulesets, and deny rules
+- Traffic flow queries and summaries
+- Ringfence creation (standard, selective, deny consumer flavors, merge idempotency)
+- Infrastructure service identification (scoring, sorting, tier classification)
+- Error handling for missing resources
 
-## Contributing
+## Illumio Rule Processing Order
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+Understanding rule processing is essential for ringfencing:
 
-## License
+1. **Essential rules** — built-in, cannot be modified
+2. **Override Deny rules** — block traffic overriding all allows (emergency use)
+3. **Allow rules** — permit traffic (ringfence remote app rules go here)
+4. **Deny rules** — block specific traffic (ringfence deny-all-inbound goes here)
+5. **Default action** — selective mode = allow-all, full enforcement = deny-all
 
-This project is licensed under the GPL-3.0 License. See the [LICENSE](LICENSE) file for details.
-
-## Support
-
-For support, please [create an issue](https://github.com/illumio/illumio-mcp/issues).
-
-# Examples
+In selective enforcement, the default is allow-all, so a deny rule is needed to make the ringfence effective. Known remote apps get allow rules (step 3) which are processed before the deny (step 4).
 
 ## Visual Examples
 
-All the examples below were generated by Claude Desktop 3.5 Sonnet and with data obtained through this MCP server. I found out that rendering the data to react components is resulting in beautiful visualizations and results.
+All the examples below were generated by Claude Desktop and with data obtained through this MCP server.
 
 ### Application Analysis
 ![Application Analysis](images/application-analysis.png)
@@ -373,7 +394,7 @@ docker run -i --init --rm \
 
 ### Docker Compose
 
-For development or testing, you can use Docker Compose. Create a `docker-compose.yml` file:
+For development or testing, you can use Docker Compose:
 
 ```yaml
 version: '3'
@@ -396,74 +417,18 @@ Then run:
 docker-compose up
 ```
 
-### Known Issues
+## Contributing
 
-When running the container, you may see syntax warnings from the Illumio SDK's regular expressions. These warnings don't affect functionality and are automatically suppressed in the container.
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
-If you're seeing the warnings when running the container, you can manually suppress them by adding:
+## License
 
-```bash
-docker run \
-  -e PYTHONWARNINGS=ignore \
-  ... other environment variables ...
-  ghcr.io/alexgoller/illumio-mcp-server:latest
-```
+This project is licensed under the GPL-3.0 License. See the [LICENSE](LICENSE) file for details.
 
-Or in docker-compose.yml:
+## Support
 
-```yaml
-services:
-  illumio-mcp:
-    environment:
-      - PYTHONWARNINGS=ignore
-      # ... other environment variables ...
-```
-
-### Claude Desktop Configuration
-
-For Claude Desktop users, add this configuration to your Claude Desktop config file:
-
-```json
-{
-    "mcpServers": {
-        "illumio-mcp-docker": {
-            "command": "docker",
-            "args": [
-                "run",
-                "-i",
-                "--init",
-                "--rm",
-                "-v",
-                "/Users/YOUR_USERNAME/tmp:/var/log/illumio-mcp",
-                "-e",
-                "DOCKER_CONTAINER=true",
-                "-e",
-                "PYTHONWARNINGS=ignore",
-                "--env-file",
-                "/Users/YOUR_USERNAME/.illumio-mcp.env",
-                "illumio-mcp:latest"
-            ]
-        }
-    }
-}
-```
-
-Make sure to:
-1. Replace `YOUR_USERNAME` with your actual username
-2. Create a log directory at `~/tmp` (or adjust the path as needed)
-3. Create an environment file at `~/.illumio-mcp.env` with your PCE credentials:
-
-```env
-PCE_HOST=your-pce-host
-PCE_PORT=your-pce-port
-PCE_ORG_ID=1
-API_KEY=your-api-key
-API_SECRET=your-api-secret
-```
-
-The configuration:
-- Uses Docker to run the container
-- Mounts a local directory for logs
-- Suppresses Python warnings
-- Loads PCE credentials from an environment file
-- Enables proper container cleanup with `--init` and `--rm`
+For support, please [create an issue](https://github.com/alexgoller/illumio-mcp-server/issues).

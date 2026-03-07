@@ -28,6 +28,19 @@ Illumio writes deny rules to the **source workload** (consumer side). The `deny_
 - **`ams`**: Consumer = All Workloads. Deny rule gets pushed to **every managed workload** outside the scope. Broader enforcement but wider blast radius.
 - **`ams_and_any`**: Consumer = All Workloads + Any IP list. Maximum coverage — deny enforced at both managed source workloads and destination workloads.
 
+## Infrastructure Service Identification
+
+Infrastructure services (DNS, AD, NTP, logging, shared databases) are consumed by many apps and should be policy'd first during segmentation rollouts. The `identify-infrastructure-services` tool builds an app-to-app communication graph from traffic flows and computes:
+
+- **In-degree centrality** (40% weight): How many distinct apps connect TO this service
+- **Betweenness centrality** (25% weight): How often this node sits on shortest paths between other apps
+- **Consumer ratio** (25% weight): in-degree / total-degree. 1.0 = pure provider (classic infra), 0.0 = pure consumer
+- **Connection volume** (10% weight): Total connections as tiebreaker
+
+Classification tiers: Core Infrastructure (>= 75), Shared Service (>= 50), Standard Application (< 50).
+
+Key insight: infrastructure services are almost exclusively *consumed* (consumer_ratio near 1.0) while endpoints and monitoring tools are *consumers* (ratio near 0.0).
+
 ## PCE API Notes
 
 - Deny rules use `/deny_rules` endpoint on rulesets with `"override": true/false` in payload

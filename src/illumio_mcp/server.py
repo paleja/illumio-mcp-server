@@ -973,6 +973,35 @@ reducing risk without requiring per-port policies.""",
                 "required": ["app_name", "env_name"]
             }
         ),
+        types.Tool(
+            name="identify-infrastructure-services",
+            description="""Analyze traffic flows to identify infrastructure services in your environment.
+Builds an app-to-app communication graph and computes centrality metrics to rank apps by how
+'infrastructure-like' they are. Infrastructure services (DNS, AD, logging, monitoring platforms,
+shared databases) are consumed by many apps and should be policy'd first during segmentation
+rollouts. Returns a ranked list with scores, classification tiers, and connectivity details.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "lookback_days": {
+                        "type": "integer",
+                        "description": "Number of days to look back for traffic flows (default: 90)",
+                        "default": 90
+                    },
+                    "min_connections": {
+                        "type": "integer",
+                        "description": "Minimum total connections for an edge to be included — filters noise (default: 1)",
+                        "default": 1
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "Number of top results to return (default: 20)",
+                        "default": 20
+                    }
+                },
+                "required": []
+            }
+        ),
     ]
 
 @server.call_tool()
@@ -3047,6 +3076,235 @@ async def handle_call_tool(
 
         except Exception as e:
             error_msg = f"Failed to create ringfence: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "identify-infrastructure-services":
+        logger.debug("=" * 80)
+        logger.debug("IDENTIFY INFRASTRUCTURE SERVICES CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            from collections import defaultdict, deque
+
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+
+            lookback_days = arguments.get("lookback_days", 90)
+            min_connections = arguments.get("min_connections", 1)
+            top_n = arguments.get("top_n", 20)
+
+            # Query all traffic
+            end = datetime.now()
+            start = end - timedelta(days=lookback_days)
+
+            traffic_query = TrafficQuery.build(
+                start_date=start.strftime("%Y-%m-%d"),
+                end_date=end.strftime("%Y-%m-%d"),
+                policy_decisions=["allowed", "potentially_blocked", "blocked"],
+                max_results=100000
+            )
+
+            flows = pce.get_traffic_flows_async(
+                query_name='infra-identification',
+                traffic_query=traffic_query
+            )
+            logger.debug(f"Got {len(flows)} flows for infrastructure analysis")
+
+            if not flows:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "message": "No traffic flows found in the specified time range",
+                    "lookback_days": lookback_days
+                }, indent=2))]
+
+            df = to_dataframe(flows)
+
+            if df.empty or 'src_app' not in df.columns or 'dst_app' not in df.columns:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "message": "Traffic data has no labeled app flows to analyze",
+                    "total_flows": len(flows)
+                }, indent=2))]
+
+            # Build app-to-app edge list (only flows where both sides have app+env labels)
+            edge_cols = ['src_app', 'src_env', 'dst_app', 'dst_env', 'num_connections']
+            edges_df = df[edge_cols].dropna().copy()
+            edges_df['src'] = edges_df['src_app'] + '|' + edges_df['src_env']
+            edges_df['dst'] = edges_df['dst_app'] + '|' + edges_df['dst_env']
+
+            # Remove self-loops (intra-app traffic)
+            edges_df = edges_df[edges_df['src'] != edges_df['dst']]
+
+            # Aggregate edges
+            edge_agg = edges_df.groupby(['src', 'dst'])['num_connections'].sum().reset_index()
+
+            # Apply min_connections filter
+            edge_agg = edge_agg[edge_agg['num_connections'] >= min_connections]
+
+            all_nodes = sorted(set(edge_agg['src']) | set(edge_agg['dst']))
+            num_nodes = len(all_nodes)
+
+            if num_nodes == 0:
+                return [types.TextContent(type="text", text=json.dumps({
+                    "message": "No app-to-app edges found after filtering",
+                    "total_flows": len(flows),
+                    "min_connections": min_connections
+                }, indent=2))]
+
+            # Compute degree metrics
+            in_degree = {}
+            out_degree = {}
+            in_conn = {}
+            out_conn = {}
+            in_neighbors = {}
+            out_neighbors = {}
+
+            for node in all_nodes:
+                ie = edge_agg[edge_agg['dst'] == node]
+                oe = edge_agg[edge_agg['src'] == node]
+                in_degree[node] = len(ie)
+                out_degree[node] = len(oe)
+                in_conn[node] = int(ie['num_connections'].sum())
+                out_conn[node] = int(oe['num_connections'].sum())
+                in_neighbors[node] = sorted(ie['src'].tolist())
+                out_neighbors[node] = sorted(oe['dst'].tolist())
+
+            # Betweenness centrality (Brandes algorithm on undirected graph)
+            adj = defaultdict(set)
+            for _, row in edge_agg.iterrows():
+                adj[row['src']].add(row['dst'])
+                adj[row['dst']].add(row['src'])
+
+            betweenness = {v: 0.0 for v in all_nodes}
+            for s in all_nodes:
+                S = []
+                P = {v: [] for v in all_nodes}
+                sigma = {v: 0 for v in all_nodes}
+                sigma[s] = 1
+                d = {v: -1 for v in all_nodes}
+                d[s] = 0
+                Q = deque([s])
+                while Q:
+                    v = Q.popleft()
+                    S.append(v)
+                    for w in adj[v]:
+                        if d[w] < 0:
+                            Q.append(w)
+                            d[w] = d[v] + 1
+                        if d[w] == d[v] + 1:
+                            sigma[w] += sigma[v]
+                            P[w].append(v)
+                delta = {v: 0.0 for v in all_nodes}
+                while S:
+                    w = S.pop()
+                    for v in P[w]:
+                        delta[v] += (sigma[v] / sigma[w]) * (1 + delta[w])
+                    if w != s:
+                        betweenness[w] += delta[w]
+
+            # Normalize betweenness
+            if num_nodes > 2:
+                norm = 1.0 / ((num_nodes - 1) * (num_nodes - 2))
+                betweenness = {k: v * norm for k, v in betweenness.items()}
+
+            # Count unmanaged sources connecting to each app
+            unmanaged_df = df[df['src_app'].isna() & df['dst_app'].notna()].copy()
+            unmanaged_in = {}
+            if not unmanaged_df.empty:
+                unmanaged_df['dst'] = unmanaged_df['dst_app'] + '|' + unmanaged_df['dst_env']
+                unmanaged_in = unmanaged_df.groupby('dst')['src_ip'].nunique().to_dict()
+
+            # Compute composite infrastructure score
+            max_in = max(in_degree.values()) if in_degree else 1
+            max_between = max(betweenness.values()) if betweenness else 1
+            max_conn = max(in_conn[n] + out_conn[n] for n in all_nodes) if all_nodes else 1
+
+            results = []
+            for node in all_nodes:
+                total_deg = in_degree[node] + out_degree[node]
+                consumer_ratio = in_degree[node] / total_deg if total_deg > 0 else 0
+                total_connections = in_conn[node] + out_conn[node]
+
+                in_deg_score = (in_degree[node] / max_in) * 100 if max_in > 0 else 0
+                between_score = (betweenness[node] / max_between) * 100 if max_between > 0 else 0
+                ratio_score = consumer_ratio * 100
+                conn_score = (total_connections / max_conn) * 100 if max_conn > 0 else 0
+
+                # Weighted: in-degree 40%, betweenness 25%, consumer_ratio 25%, volume 10%
+                infra_score = round(
+                    (in_deg_score * 0.40) + (between_score * 0.25) +
+                    (ratio_score * 0.25) + (conn_score * 0.10), 1
+                )
+
+                if infra_score >= 75:
+                    tier = "Core Infrastructure"
+                elif infra_score >= 50:
+                    tier = "Shared Service"
+                else:
+                    tier = "Standard Application"
+
+                app, env = node.split('|', 1)
+                results.append({
+                    "app": app,
+                    "env": env,
+                    "infrastructure_score": infra_score,
+                    "tier": tier,
+                    "in_degree": in_degree[node],
+                    "out_degree": out_degree[node],
+                    "betweenness_centrality": round(betweenness[node], 4),
+                    "consumer_ratio": round(consumer_ratio, 2),
+                    "inbound_connections": in_conn[node],
+                    "outbound_connections": out_conn[node],
+                    "total_connections": total_connections,
+                    "unmanaged_sources": unmanaged_in.get(node, 0),
+                    "consumed_by": in_neighbors[node],
+                    "consumes": out_neighbors[node],
+                })
+
+            # Sort by score descending
+            results.sort(key=lambda x: x["infrastructure_score"], reverse=True)
+
+            # Trim to top_n
+            results = results[:top_n]
+
+            # Build tier summary
+            core_count = sum(1 for r in results if r["tier"] == "Core Infrastructure")
+            shared_count = sum(1 for r in results if r["tier"] == "Shared Service")
+            standard_count = sum(1 for r in results if r["tier"] == "Standard Application")
+
+            output = {
+                "summary": {
+                    "total_flows_analyzed": len(flows),
+                    "lookback_days": lookback_days,
+                    "unique_apps": num_nodes,
+                    "unique_app_to_app_edges": len(edge_agg),
+                    "min_connections_filter": min_connections,
+                    "tier_counts": {
+                        "core_infrastructure": core_count,
+                        "shared_service": shared_count,
+                        "standard_application": standard_count
+                    },
+                    "scoring_methodology": (
+                        "Infrastructure score (0-100) = "
+                        "40% in-degree centrality (how many apps connect to this service) + "
+                        "25% betweenness centrality (how often this sits on paths between other apps) + "
+                        "25% consumer ratio (in-degree / total degree, 1.0 = pure provider) + "
+                        "10% connection volume. "
+                        "Core Infrastructure >= 75, Shared Service >= 50, Standard Application < 50."
+                    ),
+                    "recommendation": (
+                        "Start segmentation with Core Infrastructure and Shared Services — "
+                        "these are consumed by many apps and must be explicitly allowed in ringfence policies. "
+                        "Policy them first to avoid breaking dependent applications."
+                    )
+                },
+                "results": results
+            }
+
+            return [types.TextContent(type="text", text=json.dumps(output, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to identify infrastructure services: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 

@@ -64,6 +64,7 @@ class TestToolListing:
                     "get-traffic-flows", "get-traffic-flows-summary",
                     "get-events",
                     "create-ringfence",
+                    "identify-infrastructure-services",
                 ])
                 assert len(tool_names) == len(expected), \
                     f"Tool count mismatch: got {len(tool_names)}, expected {len(expected)}. Extra: {set(tool_names) - set(expected)}, Missing: {set(expected) - set(tool_names)}"
@@ -1111,3 +1112,78 @@ class TestRingfence:
         })
         data = parse_result(result)
         assert "error" in data
+
+
+# ---------------------------------------------------------------------------
+# Infrastructure service identification
+# ---------------------------------------------------------------------------
+
+class TestInfrastructureServices:
+    async def test_identify_infra_returns_results(self):
+        """Basic call returns ranked results with expected fields."""
+        result = await run_tool("identify-infrastructure-services", {
+            "lookback_days": 90,
+            "top_n": 10
+        })
+        data = parse_result(result)
+        assert_no_error(data, "identify-infrastructure-services")
+        assert "summary" in data
+        assert "results" in data
+        assert data["summary"]["unique_apps"] > 0
+        assert len(data["results"]) > 0
+
+        # Verify result structure
+        first = data["results"][0]
+        for field in ["app", "env", "infrastructure_score", "tier",
+                      "in_degree", "out_degree", "betweenness_centrality",
+                      "consumer_ratio", "consumed_by", "consumes"]:
+            assert field in first, f"Missing field: {field}"
+
+    async def test_identify_infra_scores_are_sorted(self):
+        """Results should be sorted by infrastructure_score descending."""
+        result = await run_tool("identify-infrastructure-services", {
+            "lookback_days": 90
+        })
+        data = parse_result(result)
+        assert_no_error(data, "identify-infrastructure-services")
+        scores = [r["infrastructure_score"] for r in data["results"]]
+        assert scores == sorted(scores, reverse=True), "Results not sorted by score"
+
+    async def test_identify_infra_tiers_match_scores(self):
+        """Tier classification should match score thresholds."""
+        result = await run_tool("identify-infrastructure-services", {
+            "lookback_days": 90
+        })
+        data = parse_result(result)
+        assert_no_error(data, "identify-infrastructure-services")
+        for r in data["results"]:
+            score = r["infrastructure_score"]
+            tier = r["tier"]
+            if score >= 75:
+                assert tier == "Core Infrastructure", f"{r['app']}|{r['env']} score={score} should be Core Infrastructure, got {tier}"
+            elif score >= 50:
+                assert tier == "Shared Service", f"{r['app']}|{r['env']} score={score} should be Shared Service, got {tier}"
+            else:
+                assert tier == "Standard Application", f"{r['app']}|{r['env']} score={score} should be Standard Application, got {tier}"
+
+    async def test_identify_infra_pure_providers_have_high_ratio(self):
+        """Apps with out_degree=0 should have consumer_ratio=1.0."""
+        result = await run_tool("identify-infrastructure-services", {
+            "lookback_days": 90
+        })
+        data = parse_result(result)
+        assert_no_error(data, "identify-infrastructure-services")
+        for r in data["results"]:
+            if r["out_degree"] == 0 and r["in_degree"] > 0:
+                assert r["consumer_ratio"] == 1.0, \
+                    f"{r['app']}|{r['env']} is pure provider but ratio={r['consumer_ratio']}"
+
+    async def test_identify_infra_top_n_limits_results(self):
+        """top_n parameter should limit the number of results."""
+        result = await run_tool("identify-infrastructure-services", {
+            "lookback_days": 90,
+            "top_n": 3
+        })
+        data = parse_result(result)
+        assert_no_error(data, "identify-infrastructure-services")
+        assert len(data["results"]) <= 3

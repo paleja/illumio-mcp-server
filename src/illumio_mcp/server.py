@@ -543,7 +543,7 @@ async def handle_list_tools() -> list[types.Tool]:
                                 "rule_type": {
                                     "type": "string",
                                     "enum": ["allow", "deny", "override_deny"],
-                                    "description": "Type of rule: 'allow' (default), 'deny' to block traffic, or 'override_deny' to override a deny rule",
+                                    "description": "Type of rule: 'allow' (default), 'deny' to block specific traffic, or 'override_deny' to block traffic overriding ALL allow rules (emergency use only — highest priority deny)",
                                     "default": "allow"
                                 }
                             },
@@ -556,7 +556,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="create-deny-rule",
-            description="Create a deny rule in an existing ruleset. Deny rules block specific traffic. They are created inside rulesets just like allow rules but with rule_type 'deny'. Override deny rules allow traffic that would otherwise be denied by a deny rule.",
+            description="Create a deny rule in an existing ruleset. Deny rules block specific traffic (processed after allow rules). Override deny rules (override_deny=true) are the HIGHEST priority — they block traffic even when allow rules exist, overriding everything. Use override deny only for emergencies like isolating a compromised system. Rule processing order: 1) Essential rules, 2) Override Deny (blocks above all), 3) Allow rules, 4) Deny rules, 5) Default action.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -592,7 +592,7 @@ async def handle_list_tools() -> list[types.Tool]:
                     },
                     "override_deny": {
                         "type": "boolean",
-                        "description": "If true, creates an override deny rule (allows traffic that would be denied). If false (default), creates a deny rule.",
+                        "description": "If true, creates an override deny rule — the highest priority deny that blocks traffic even if allow rules exist. Used for emergency blocking scenarios (e.g., isolating a compromised app). If false (default), creates a regular deny rule.",
                         "default": False
                     },
                     "unscoped_consumers": {

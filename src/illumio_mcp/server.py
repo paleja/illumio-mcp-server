@@ -248,6 +248,743 @@ The `policy_decision` field on traffic flows is extremely powerful:
 - The `enforcement-readiness` tool uses this to assess readiness
 """
     },
+    "illumio://compliance/pci-dss": {
+        "name": "PCI-DSS Segmentation & Visibility Requirements",
+        "description": "PCI-DSS v4.0 requirements mapped to Illumio segmentation and visibility controls",
+        "content": """# PCI-DSS v4.0 — Segmentation & Visibility with Illumio
+
+## Overview
+PCI-DSS requires organizations that handle cardholder data to implement strict network segmentation
+and access controls. Illumio provides micro-segmentation that directly maps to PCI requirements.
+
+## Key Concept: Cardholder Data Environment (CDE)
+The CDE includes all systems that store, process, or transmit cardholder data, plus any systems
+directly connected to or supporting those systems. Proper segmentation REDUCES PCI scope by
+isolating the CDE from the rest of the network.
+
+## Requirement Mapping
+
+### Requirement 1: Install and Maintain Network Security Controls
+- **1.2.1** — Network security controls (NSCs) must restrict traffic between CDE and untrusted networks
+  - Illumio: Ringfence CDE apps with `create-ringfence` using `selective=true`
+  - Override deny for absolute blocks: CDE must NEVER reach certain external networks
+- **1.2.5** — All services, protocols, and ports allowed must be documented and authorized
+  - Illumio: `get-traffic-flows-summary` shows all observed services with policy decisions
+  - `get-policy-coverage-report` identifies gaps between observed traffic and policy
+- **1.3.1** — Inbound traffic to the CDE must be restricted to only necessary traffic
+  - Illumio: Extra-scope allow rules in ringfence rulesets explicitly permit inbound sources
+  - All other inbound is blocked by deny rule (selective) or default deny (full enforcement)
+- **1.3.2** — Outbound traffic from the CDE must be restricted to only necessary traffic
+  - Illumio: Create outbound rulesets scoped to CDE apps with explicit allow rules
+- **1.4.1** — NSCs between trusted and untrusted networks must be implemented
+  - Illumio: Enforcement mode must be `selective` or `full` for CDE workloads
+  - `get-workload-enforcement-status` verifies all CDE workloads are enforced
+
+### Requirement 2: Apply Secure Configurations
+- **2.2.4** — Only necessary services, protocols, daemons, and functions are enabled
+  - Illumio: `find-unmanaged-traffic` detects unauthorized services
+  - Traffic flow analysis shows unnecessary port exposure
+
+### Requirement 6: Develop and Maintain Secure Systems
+- **6.4.1** — Public-facing web applications must be protected
+  - Illumio: Identify internet-facing workloads via traffic flows from unmanaged IPs
+  - Ringfence public-facing apps separately from internal CDE systems
+
+### Requirement 7: Restrict Access to System Components
+- **7.2.1** — Access control systems must restrict access based on business need
+  - Illumio: Label-based policy ensures only authorized apps reach CDE
+  - `compliance-check framework=pci-dss` validates rule coverage
+- **7.2.5** — All application and system accounts are assigned least privilege
+  - Illumio: Granular rules per port/protocol instead of "All Services" for CDE
+
+### Requirement 10: Log and Monitor All Access
+- **10.2.1** — Audit logs capture all access to cardholder data
+  - Illumio: `get-events` provides PCE audit trail
+  - Traffic flows serve as network-level access logs
+- **10.4.1** — Audit logs are reviewed to identify anomalies
+  - Illumio: `detect-lateral-movement-paths` identifies unexpected connectivity
+
+### Requirement 11: Test Security Systems and Processes
+- **11.4.1** — Penetration testing validates segmentation controls
+  - Illumio: `enforcement-readiness` assesses policy completeness
+  - `compare-draft-active` ensures no policy drift
+
+## PCI-Specific High-Risk Ports
+These ports require explicit allow rules and should NEVER be open to/from CDE without justification:
+- **3389** (RDP) — Remote Desktop, primary attack vector
+- **22** (SSH) — Secure Shell, limit to jump hosts only
+- **23** (Telnet) — MUST be blocked, unencrypted protocol
+- **445** (SMB) — Windows file sharing, lateral movement vector
+- **1433** (MSSQL), **3306** (MySQL), **5432** (PostgreSQL), **1521** (Oracle) — Database ports, CDE core
+- **27017** (MongoDB), **6379** (Redis) — NoSQL databases
+- **135/139** (NetBIOS/RPC) — Windows infrastructure, restrict within CDE only
+
+## Segmentation Validation Strategy
+1. Use `identify-infrastructure-services` to find shared services CDE depends on
+2. Ringfence CDE apps with `create-ringfence` (selective mode for gradual rollout)
+3. Use `enforcement-readiness` to assess each CDE app before moving to full enforcement
+4. Run `compliance-check framework=pci-dss` to validate against requirements
+5. Use `get-policy-coverage-report` to prove all CDE traffic is policy-covered
+6. Document with `get-traffic-flows-summary` showing only authorized flows remain
+"""
+    },
+    "illumio://compliance/dora": {
+        "name": "DORA (Digital Operational Resilience Act) Requirements",
+        "description": "EU DORA regulation mapped to Illumio segmentation and operational resilience controls",
+        "content": """# DORA — Digital Operational Resilience Act with Illumio
+
+## Overview
+DORA (EU Regulation 2022/2554) requires financial entities to ensure digital operational resilience
+through ICT risk management, incident reporting, resilience testing, and third-party risk management.
+Effective January 17, 2025.
+
+## Who Must Comply
+Banks, insurance companies, investment firms, payment institutions, crypto-asset service providers,
+and critical ICT third-party service providers operating in the EU.
+
+## Requirement Mapping
+
+### Chapter II: ICT Risk Management Framework (Articles 5-16)
+
+#### Article 6: ICT Risk Management Framework
+- **6.8** — Identify, classify, and document all ICT assets and dependencies
+  - Illumio: `get-workloads` with label filtering provides complete asset inventory
+  - `identify-infrastructure-services` maps critical ICT dependencies
+  - Labels (app, env, role, loc) classify assets by function and criticality
+
+#### Article 7: ICT Systems, Protocols, and Tools
+- **7.1** — Use resilient, reliable ICT systems with sufficient capacity
+  - Illumio: `get-workload-enforcement-status` ensures protection is active
+  - Monitor enforcement mode consistency across critical systems
+
+#### Article 8: Identification
+- **8.1** — Identify and document all ICT-supported business functions and assets
+  - Illumio: Traffic flow analysis reveals actual application dependencies
+  - `get-traffic-flows-summary` documents communication patterns
+  - `find-unmanaged-traffic` identifies undocumented ICT assets
+
+#### Article 9: Protection and Prevention
+- **9.1** — Continuously monitor and control ICT system security
+  - Illumio: Micro-segmentation prevents lateral movement between systems
+  - `detect-lateral-movement-paths` identifies potential propagation paths
+- **9.2** — Implement policies to restrict network access
+  - Illumio: `create-ringfence` enforces app-level segmentation
+  - Enforcement modes control traffic at the workload level
+- **9.3** — Design network connectivity to allow immediate severing/isolation
+  - Illumio: Override deny rules can instantly isolate compromised systems
+  - `emergency-isolate-application` prompt provides guided isolation workflow
+  - Isolation is immediate — no firewall change requests needed
+
+#### Article 10: Detection
+- **10.1** — Detect anomalous activities, network performance issues, ICT incidents
+  - Illumio: `get-events` monitors PCE events with severity filtering
+  - Traffic flow analysis detects unauthorized communication patterns
+  - `find-unmanaged-traffic` surfaces unknown connections
+
+#### Article 11: Response and Recovery
+- **11.1** — ICT business continuity policy with response and recovery plans
+  - Illumio: Segmentation limits blast radius of incidents
+  - Override deny enables immediate containment
+  - `compare-draft-active` ensures recovery policy is ready to provision
+- **11.3** — Activate response plans upon ICT-related incidents
+  - Illumio: `emergency-isolate-application` provides one-click isolation
+  - `provision-policy` can rapidly deploy pre-staged containment rules
+
+### Chapter III: ICT-Related Incident Management (Articles 17-23)
+
+#### Article 17: ICT-Related Incident Management Process
+- **17.1** — Classify and report ICT incidents by impact and severity
+  - Illumio: `get-events` with severity filters supports incident classification
+  - Traffic flows provide forensic evidence of incident scope
+
+#### Article 18: Classification of ICT-Related Incidents
+- Map incident severity to segmentation response:
+  - **Critical**: Override deny — immediate isolation
+  - **Major**: Selective enforcement — restrict to known-good traffic
+  - **Minor**: Monitor via visibility mode, draft new rules as needed
+
+### Chapter IV: Digital Operational Resilience Testing (Articles 24-27)
+
+#### Article 25: Testing ICT Tools and Systems
+- **25.1** — Perform vulnerability assessments, network security assessments
+  - Illumio: `compliance-check` validates segmentation policy
+  - `enforcement-readiness` assesses enforcement completeness
+  - `get-policy-coverage-report` measures policy coverage
+
+#### Article 26: Advanced Testing (TLPT)
+- **26.1** — Threat-led penetration testing for significant financial entities
+  - Illumio: `detect-lateral-movement-paths` maps potential attack paths
+  - Segmentation effectiveness can be validated without disruption using visibility mode
+
+### Chapter V: Third-Party Risk Management (Articles 28-44)
+
+#### Article 28: ICT Third-Party Risk
+- **28.1** — Manage risks from ICT third-party service providers
+  - Illumio: `find-unmanaged-traffic` reveals third-party connections
+  - Ringfence third-party integration points
+  - Monitor third-party traffic patterns for anomalies
+
+## DORA-Specific Segmentation Strategy
+1. **Identify**: Use `identify-infrastructure-services` + `get-workloads` to map all ICT assets
+2. **Classify**: Label workloads by criticality and business function
+3. **Protect**: Ringfence critical financial services, enforce segmentation
+4. **Detect**: Monitor traffic flows for anomalous patterns
+5. **Respond**: Pre-stage override deny rules for critical systems, test isolation procedures
+6. **Recover**: Use `compare-draft-active` to manage recovery policy, provision when ready
+
+## Key DORA Principle: Immediate Isolation Capability
+DORA Article 9.3 specifically requires the ability to immediately sever/isolate affected systems.
+Illumio's override deny rules provide this — they block traffic instantly, overriding any allow rules.
+This maps directly to DORA's requirement for rapid containment during ICT incidents.
+"""
+    },
+    "illumio://compliance/nist-800-53": {
+        "name": "NIST 800-53 Security Controls",
+        "description": "NIST 800-53 Rev 5 controls mapped to Illumio segmentation capabilities",
+        "content": """# NIST 800-53 Rev 5 — Security Controls with Illumio
+
+## Overview
+NIST 800-53 provides a catalog of security and privacy controls for federal information systems.
+Many private sector organizations adopt it as a comprehensive security framework.
+
+## Control Family Mapping
+
+### AC — Access Control
+
+#### AC-3: Access Enforcement
+- Enforce approved authorizations for logical access to information and system resources
+- Illumio: Label-based policy enforces access at the workload level
+- Rulesets define exactly which apps can communicate with which
+- `get-policy-coverage-report` validates enforcement completeness
+
+#### AC-4: Information Flow Enforcement
+- Enforce approved authorizations for controlling the flow of information within the system
+  and between connected systems
+- Illumio: Micro-segmentation controls east-west traffic flows
+- Ringfencing enforces app-to-app communication policies
+- Policy decisions (allowed/blocked/potentially_blocked) show flow enforcement status
+- **AC-4(21)** Physical/logical separation of information flows
+  - Illumio: Labels create logical separation without physical network changes
+
+#### AC-17: Remote Access
+- Establish usage restrictions and implementation guidance for remote access
+- Illumio: Control which systems remote access (RDP 3389, SSH 22, VNC 5900) can reach
+- High-risk ports must have explicit allow rules only to authorized destinations
+
+### AU — Audit and Accountability
+
+#### AU-2: Event Logging
+- Identify events that the system must log
+- Illumio: `get-events` provides comprehensive PCE event logging
+- Traffic flows serve as network-level audit trail
+
+#### AU-6: Audit Record Review, Analysis, and Reporting
+- Review and analyze audit records for indications of inappropriate or unusual activity
+- Illumio: `detect-lateral-movement-paths` analyzes traffic for unusual patterns
+- `find-unmanaged-traffic` identifies unauthorized connections
+
+### CA — Assessment, Authorization, and Monitoring
+
+#### CA-7: Continuous Monitoring
+- Develop a continuous monitoring strategy and implement a program
+- Illumio: Continuous traffic flow visibility across all workloads
+- `enforcement-readiness` provides ongoing readiness assessment
+- `compliance-check` can be run periodically for compliance validation
+
+### CM — Configuration Management
+
+#### CM-7: Least Functionality
+- Configure the system to provide only essential capabilities
+- Restrict the use of unnecessary ports, protocols, functions, and services
+- Illumio: Traffic analysis reveals unnecessary services
+- `find-unmanaged-traffic` identifies services outside policy
+- Ringfencing limits each app to only its required connectivity
+
+### IA — Identification and Authentication
+
+#### IA-3: Device Identification and Authentication
+- Uniquely identify and authenticate devices before establishing connections
+- Illumio: VEN agents on workloads provide device-level identification
+- Labels provide logical identity for policy decisions
+
+### IR — Incident Response
+
+#### IR-4: Incident Handling
+- Implement an incident handling capability including preparation, detection, containment
+- Illumio: Override deny rules provide immediate containment
+- `emergency-isolate-application` enables rapid incident response
+- Segmentation limits blast radius during incidents
+
+#### IR-6: Incident Reporting
+- Report incidents to appropriate authorities and organizational entities
+- Illumio: `get-events` provides incident evidence and audit trail
+- Traffic flow data supports forensic analysis
+
+### SC — System and Communications Protection
+
+#### SC-7: Boundary Protection
+- Monitor and control communications at external managed interfaces and key internal boundaries
+- Illumio: Micro-segmentation creates boundaries at every workload
+- `create-ringfence` establishes application-level boundaries
+- `get-workload-enforcement-status` verifies boundary enforcement
+- **SC-7(5)** Deny by default / allow by exception
+  - Illumio: Full enforcement mode = deny-all default, only explicitly allowed traffic passes
+  - Selective enforcement = allow-all default with explicit deny rules
+
+#### SC-28: Protection of Information at Rest
+- Protect the confidentiality and integrity of information at rest
+- Illumio: Segment database systems containing sensitive data
+- Override deny blocks ensure critical data stores are never exposed
+
+### SI — System and Information Integrity
+
+#### SI-4: System Monitoring
+- Monitor the system to detect attacks, unauthorized connections, and anomalies
+- Illumio: Traffic flow analysis detects unauthorized network activity
+- `detect-lateral-movement-paths` identifies potential attack paths
+- `find-unmanaged-traffic` surfaces unknown connections
+
+## NIST High-Risk Ports
+Ports requiring explicit authorization under NIST controls:
+- **22** (SSH), **23** (Telnet), **3389** (RDP) — Remote access
+- **135/139** (NetBIOS/RPC), **445** (SMB) — Windows services
+- **1433** (MSSQL), **3306** (MySQL), **5432** (PostgreSQL) — Databases
+- **80/443** (HTTP/HTTPS) — Web services (restrict from internal systems to CDE)
+"""
+    },
+    "illumio://compliance/iso-27001": {
+        "name": "ISO 27001:2022 Controls",
+        "description": "ISO 27001:2022 Annex A controls mapped to Illumio segmentation capabilities",
+        "content": """# ISO 27001:2022 — Information Security Controls with Illumio
+
+## Overview
+ISO 27001:2022 is the international standard for information security management systems (ISMS).
+Annex A contains 93 controls organized into 4 themes. Network segmentation maps to multiple controls.
+
+## Annex A Control Mapping
+
+### A.5 — Organizational Controls
+
+#### A.5.9: Inventory of Information and Other Associated Assets
+- Maintain an inventory of information and associated assets
+- Illumio: `get-workloads` provides workload inventory with labels
+- Labels classify assets by app, env, role, and location
+- `identify-infrastructure-services` maps critical dependencies
+
+#### A.5.23: Information Security for Use of Cloud Services
+- Establish processes for acquisition, use, management, and exit of cloud services
+- Illumio: Segment cloud workloads with same label-based policy as on-premises
+- `find-unmanaged-traffic` identifies cloud service dependencies
+
+#### A.5.25: Assessment and Decision on Information Security Events
+- Assess information security events and decide if they are incidents
+- Illumio: `get-events` provides security event visibility
+- Traffic flows provide evidence for event assessment
+
+### A.8 — Technological Controls
+
+#### A.8.20: Networks Security
+- Secure networks and network services, including mechanisms for filtering traffic
+- Illumio: Micro-segmentation provides workload-level traffic filtering
+- `create-ringfence` establishes network security boundaries
+- `get-workload-enforcement-status` validates security is active
+
+#### A.8.21: Security of Network Services
+- Identify and implement security mechanisms, service levels, and requirements
+- Illumio: Policy-driven segmentation ensures consistent network security
+- `compliance-check` validates control effectiveness
+
+#### A.8.22: Segregation of Networks
+- Groups of information services, users, and information systems shall be segregated
+- Illumio: Label-based segmentation segregates by application, environment, and role
+- Ringfencing provides coarse-grained segregation
+- Fine-grained rules provide per-port/protocol controls within segments
+- `detect-lateral-movement-paths` validates segregation effectiveness
+
+#### A.8.23: Web Filtering
+- Access to external websites shall be managed to reduce exposure to malicious content
+- Illumio: Outbound traffic rules control which systems can reach external services
+- `find-unmanaged-traffic` direction=outbound identifies uncontrolled outbound connections
+
+#### A.8.26: Application Security Requirements
+- Information security requirements shall be identified and specified when developing/acquiring applications
+- Illumio: `enforcement-readiness` validates security completeness per application
+- `get-policy-coverage-report` measures policy coverage
+
+## ISO 27001 Segmentation Best Practices
+1. **Classify** assets using Illumio labels (app, env, role, loc)
+2. **Segregate** using ringfencing between applications and environments
+3. **Enforce** with progressive enforcement (visibility → selective → full)
+4. **Monitor** with continuous traffic flow analysis
+5. **Audit** with compliance checks and event monitoring
+6. **Improve** using enforcement readiness scores to track progress
+"""
+    },
+    "illumio://compliance/swift-csp": {
+        "name": "SWIFT Customer Security Programme (CSP)",
+        "description": "SWIFT CSP controls mapped to Illumio segmentation for financial messaging security",
+        "content": """# SWIFT CSP — Customer Security Programme with Illumio
+
+## Overview
+SWIFT's Customer Security Programme (CSP) establishes mandatory security controls for all
+organizations connected to the SWIFT network. The secure zone containing SWIFT infrastructure
+must be strictly segmented from the rest of the enterprise network.
+
+## Key Concept: SWIFT Secure Zone
+The SWIFT secure zone contains all SWIFT-related components:
+- SWIFT messaging interfaces (Alliance Lite2, Alliance Access, Alliance Gateway)
+- SWIFT communication interfaces
+- Operator PCs used to access SWIFT
+- Any system that directly connects to SWIFT infrastructure
+
+This zone MUST be isolated from the general enterprise network.
+
+## Mandatory Control Mapping
+
+### 1. Restrict Internet Access & Protect Critical Systems
+
+#### 1.1: SWIFT Environment Protection
+- Ensure the protection of the SWIFT infrastructure from the general IT environment
+- Illumio: Ringfence SWIFT zone apps with `create-ringfence selective=true`
+- Override deny to block SWIFT zone from internet access entirely
+- Only explicitly authorized systems can reach SWIFT components
+
+#### 1.2: Operating System Privileged Account Control
+- Restrict and control privileged OS account usage within the SWIFT secure zone
+- Illumio: Limit SSH (22) and RDP (3389) access to SWIFT systems to jump hosts only
+- Explicit allow rules only for authorized admin connections
+
+#### 1.4: Restriction of Internet Access
+- SWIFT-connected systems must not have direct internet access
+- Illumio: **Override deny rule** blocking all traffic from SWIFT zone to internet IPs
+- This is a "must not happen under any circumstances" scenario — override deny is correct here
+- `find-unmanaged-traffic` validates no unauthorized internet connections exist
+
+### 2. Reduce Attack Surface and Vulnerabilities
+
+#### 2.1: Internal Data Flow Security
+- Ensure confidentiality, integrity, and authentication of data flows between SWIFT components
+- Illumio: Intra-scope rules control traffic within SWIFT zone
+- Enforce specific port/protocol rules (not All Services) between SWIFT components
+
+#### 2.6: Operator Session Confidentiality and Integrity
+- Protect operator sessions to SWIFT-related applications
+- Illumio: Allow only encrypted protocols (SSH, HTTPS) from operator PCs to SWIFT systems
+- Block unencrypted protocols (Telnet 23, HTTP 80, FTP 21)
+
+### 3. Physically Secure the Environment
+(Physical controls — Illumio supports with logical segmentation of location-labeled workloads)
+
+### 4. Prevent Compromise of Credentials
+
+#### 4.1: Password Policy
+- Enforce strong password policies for SWIFT system accounts
+- Illumio: Complements by ensuring only authorized systems can attempt authentication
+
+### 5. Manage Identities and Segregate Privileges
+
+#### 5.1: Logical Access Control
+- Enforce least-privilege access to SWIFT systems
+- Illumio: Fine-grained rules restrict SWIFT zone access to specific source apps/roles
+- `get-policy-coverage-report` validates all SWIFT traffic is explicitly authorized
+
+### 6. Detect Anomalous Activity
+
+#### 6.1: Malware Protection
+- Detect and prevent malware in the SWIFT secure zone
+- Illumio: Segmentation prevents malware lateral movement into/within SWIFT zone
+- `detect-lateral-movement-paths` identifies potential propagation vectors
+
+#### 6.4: Logging and Monitoring
+- Record and monitor security events in the SWIFT secure zone
+- Illumio: `get-events` monitors SWIFT-related policy events
+- Traffic flows provide network-level audit trail for SWIFT zone
+
+## SWIFT-Specific High-Risk Ports
+Ports requiring strict control in the SWIFT secure zone:
+- **3389** (RDP), **22** (SSH) — Admin access, restrict to jump hosts
+- **23** (Telnet), **21** (FTP) — MUST be blocked (unencrypted)
+- **80** (HTTP) — Block in favor of HTTPS only
+- **1433/3306/5432** — Database access, restrict to SWIFT application servers
+- **445** (SMB), **135/139** (NetBIOS) — Block within SWIFT zone
+
+## SWIFT Segmentation Strategy
+1. Label all SWIFT components with dedicated app label (e.g., app=SWIFT)
+2. Create SWIFT secure zone ringfence with `create-ringfence selective=true`
+3. Add **override deny** blocking SWIFT zone → internet (must never happen)
+4. Add explicit allow rules for authorized connections only
+5. Validate with `compliance-check` and `get-policy-coverage-report`
+6. Move to full enforcement after validation
+"""
+    },
+    "illumio://compliance/cis-controls": {
+        "name": "CIS Controls v8",
+        "description": "CIS Critical Security Controls v8 mapped to Illumio segmentation capabilities",
+        "content": """# CIS Controls v8 — Critical Security Controls with Illumio
+
+## Overview
+The CIS Critical Security Controls (formerly SANS Top 20) are a prioritized set of actions
+to protect organizations from known cyber-attack vectors. Illumio maps to several controls
+in the network and data protection domains.
+
+## Control Mapping
+
+### CIS Control 1: Inventory and Control of Enterprise Assets
+- Actively manage all enterprise assets connected to the network
+- Illumio: `get-workloads` provides managed asset inventory
+- `find-unmanaged-traffic` reveals assets not yet under management
+- Labels provide classification (app, env, role, location)
+
+### CIS Control 2: Inventory and Control of Software Assets
+- Actively manage all software on the network
+- Illumio: Traffic flow analysis reveals which services/ports are in use
+- Unexpected services indicate unauthorized software
+
+### CIS Control 3: Data Protection
+- Develop processes and controls to identify, classify, securely handle data
+- Illumio: Segment systems handling sensitive data with ringfencing
+- Override deny for systems that must never expose data externally
+
+### CIS Control 4: Secure Configuration of Enterprise Assets and Software
+- Establish and maintain secure configurations
+- Illumio: `compliance-check` validates segmentation configuration
+- `get-workload-enforcement-status` verifies enforcement is properly configured
+
+### CIS Control 6: Access Control Management
+- Use processes and tools to create, assign, manage, and revoke access credentials
+- Illumio: Label-based policy controls network-level access
+- Rules define exactly which applications can communicate
+
+### CIS Control 7: Continuous Vulnerability Management
+- Develop a plan to continuously assess and remediate vulnerabilities
+- Illumio: `enforcement-readiness` provides ongoing security posture assessment
+- `detect-lateral-movement-paths` identifies vulnerability propagation paths
+
+### CIS Control 8: Audit Log Management
+- Collect, alert, review, and retain audit logs of events
+- Illumio: `get-events` provides audit log access
+- Traffic flows provide network-level audit data
+
+### CIS Control 9: Email and Web Browser Protections
+- Improve protections and detections of threats from email and web vectors
+- Illumio: Control which systems can reach web/email ports (80, 443, 25, 587)
+
+### CIS Control 12: Network Infrastructure Management
+- **12.2** — Establish and maintain a secure network architecture
+  - Illumio: Micro-segmentation creates a secure architecture without network redesign
+  - `create-ringfence` establishes app-level security boundaries
+- **12.3** — Securely manage network infrastructure
+  - Illumio: `get-workload-enforcement-status` monitors enforcement health
+- **12.8** — Establish and maintain dedicated computing resources for admin work
+  - Illumio: Segment admin jump hosts, restrict RDP/SSH to these only
+
+### CIS Control 13: Network Monitoring and Defense
+- **13.1** — Centralize security event alerting
+  - Illumio: `get-events` provides centralized security events
+- **13.3** — Deploy a network intrusion detection solution
+  - Illumio: Traffic flow visibility serves as behavior-based detection
+  - `detect-lateral-movement-paths` identifies suspicious connectivity
+- **13.4** — Perform traffic filtering between network segments
+  - Illumio: Core capability — micro-segmentation is traffic filtering
+  - `get-policy-coverage-report` validates filtering completeness
+- **13.5** — Manage access control for remote assets
+  - Illumio: VPN/remote access segmentation via label-based policy
+
+### CIS Control 17: Incident Response Management
+- **17.1** — Designate personnel to manage incident handling
+- **17.3** — Establish and maintain an incident response plan
+  - Illumio: Override deny rules enable immediate containment
+  - `emergency-isolate-application` provides guided incident response
+  - Pre-stage containment rules in draft policy for rapid deployment
+
+## CIS High-Risk Ports
+- **3389** (RDP), **22** (SSH), **23** (Telnet) — Remote access
+- **445** (SMB), **135/139** (NetBIOS/RPC) — File sharing / Windows
+- **21** (FTP), **69** (TFTP) — File transfer (unencrypted)
+- **25/587** (SMTP) — Email servers
+"""
+    },
+    "illumio://compliance/hipaa": {
+        "name": "HIPAA Security Rule",
+        "description": "HIPAA Security Rule requirements mapped to Illumio segmentation for healthcare data protection",
+        "content": """# HIPAA Security Rule — Healthcare Segmentation with Illumio
+
+## Overview
+The HIPAA Security Rule requires covered entities and business associates to implement
+safeguards to protect electronic Protected Health Information (ePHI). Network segmentation
+is a key technical safeguard.
+
+## Key Concept: ePHI Environment
+Systems that create, receive, maintain, or transmit ePHI must be identified and protected.
+Segmenting ePHI systems reduces the scope of HIPAA compliance requirements.
+
+## Safeguard Mapping
+
+### Administrative Safeguards (§164.308)
+
+#### §164.308(a)(1) — Security Management Process
+- Implement policies and procedures to prevent, detect, contain, and correct security violations
+- Illumio: Micro-segmentation prevents lateral movement to ePHI systems
+- `detect-lateral-movement-paths` identifies potential violation paths
+- Override deny enables immediate containment of active violations
+
+#### §164.308(a)(7) — Contingency Plan
+- Establish policies for responding to emergencies that damage ePHI systems
+- Illumio: `emergency-isolate-application` provides rapid containment
+- Pre-staged draft policies enable quick recovery
+
+### Physical Safeguards (§164.310)
+
+#### §164.310(b) — Workstation Use
+- Implement policies specifying proper functions and manner of use for workstations
+- Illumio: Segment workstations by role, restrict ePHI access to authorized roles
+
+### Technical Safeguards (§164.312)
+
+#### §164.312(a)(1) — Access Control
+- Implement technical policies to allow access only to authorized persons/software
+- Illumio: Label-based policy restricts ePHI system access to authorized applications
+- `create-ringfence` isolates ePHI systems from general network
+- `get-policy-coverage-report` validates access control completeness
+
+#### §164.312(b) — Audit Controls
+- Implement mechanisms to record and examine activity in systems containing ePHI
+- Illumio: Traffic flows provide network-level audit trail
+- `get-events` provides system-level audit records
+
+#### §164.312(c)(1) — Integrity
+- Protect ePHI from improper alteration or destruction
+- Illumio: Segment database systems containing ePHI
+- Restrict database port access to authorized application servers only
+
+#### §164.312(d) — Person or Entity Authentication
+- Verify identity of persons/entities seeking access to ePHI
+- Illumio: Network-level authentication via workload identity (VEN + labels)
+- Only authenticated, labeled workloads can reach ePHI systems
+
+#### §164.312(e)(1) — Transmission Security
+- Implement technical measures to guard against unauthorized access to ePHI during transmission
+- Illumio: Block unencrypted protocols (Telnet, FTP, HTTP) to/from ePHI systems
+- Allow only encrypted protocols (SSH, HTTPS, TLS-wrapped database connections)
+
+## HIPAA Segmentation Strategy
+1. Label all ePHI systems (app=EMR, app=PACS, app=PatientDB, etc.)
+2. Identify ePHI dependencies with `identify-infrastructure-services`
+3. Ringfence each ePHI application with strict inbound/outbound controls
+4. Block unencrypted protocols to ePHI zone via deny rules
+5. Validate with `compliance-check` and `enforcement-readiness`
+6. Monitor with continuous traffic flow analysis
+"""
+    },
+    "illumio://compliance/segmentation-methodology": {
+        "name": "Segmentation Methodology & Best Practices",
+        "description": "General methodology for implementing micro-segmentation with Illumio across any compliance framework",
+        "content": """# Segmentation Methodology — Framework-Agnostic Best Practices
+
+## The Segmentation Journey
+
+### Phase 1: Discovery & Visibility
+**Goal**: Understand what you have and how it communicates.
+
+1. **Asset Discovery**
+   - Deploy VEN agents on all workloads
+   - `get-workloads` to inventory managed systems
+   - Assign labels: app, env, role, location
+
+2. **Traffic Discovery**
+   - Set enforcement mode to `visibility_only`
+   - Collect traffic flows for 30-90 days
+   - `get-traffic-flows-summary` to understand communication patterns
+   - `find-unmanaged-traffic` to identify blind spots
+
+3. **Dependency Mapping**
+   - `identify-infrastructure-services` to find critical shared services
+   - Map app-to-app dependencies from traffic flows
+   - Identify internet-facing vs internal-only applications
+   - `detect-lateral-movement-paths` to understand risk exposure
+
+### Phase 2: Policy Design
+**Goal**: Design segmentation policy before enforcing it.
+
+1. **Infrastructure First**
+   - Policy infrastructure services first (DNS, AD, monitoring, backup)
+   - These are consumed by many apps — if you ringfence apps without allowing infra, you break things
+   - Use `identify-infrastructure-services` to prioritize
+
+2. **Application Ringfencing**
+   - `create-ringfence` for each application (dry_run=true first)
+   - Review discovered remote apps and validate they should have access
+   - Use `skip_allowed=true` for minimal rulesets or `false` for self-documenting ones
+
+3. **Compliance Zone Isolation**
+   - CDE (PCI), SWIFT zone, ePHI systems get additional restrictions
+   - Override deny for hard blocks (e.g., "CDE must never reach internet")
+   - Fine-grained rules within compliance zones (not just All Services)
+
+4. **Policy Validation**
+   - `enforcement-readiness` to assess each app
+   - `get-policy-coverage-report` to measure coverage
+   - `compare-draft-active` to review pending changes
+   - `compliance-check` against relevant framework
+
+### Phase 3: Enforcement Rollout
+**Goal**: Progressively enforce policy with minimal disruption.
+
+1. **Selective Enforcement First**
+   - Move workloads from `visibility_only` to `selective`
+   - Selective mode: default=allow, deny rules are actively enforced
+   - This catches gross violations without breaking everything
+   - `get-workload-enforcement-status` to track rollout progress
+
+2. **Monitor and Adjust**
+   - Watch for `blocked` traffic in flows — is it intentional or a missing rule?
+   - `get-policy-coverage-report` shows gaps
+   - Add rules for legitimate traffic before moving to full enforcement
+
+3. **Full Enforcement**
+   - Move workloads to `full` enforcement
+   - Default=deny: only explicitly allowed traffic flows
+   - Start with less critical apps, build confidence
+   - Critical systems last (after thorough validation)
+
+### Phase 4: Continuous Operations
+**Goal**: Maintain and improve segmentation over time.
+
+1. **Ongoing Monitoring**
+   - Regular `compliance-check` runs
+   - `find-unmanaged-traffic` to catch new unauthorized connections
+   - `get-events` for security event monitoring
+
+2. **Policy Drift Detection**
+   - `compare-draft-active` to detect uncommitted changes
+   - `enforcement-readiness` scores should trend upward
+
+3. **Incident Response**
+   - Override deny for emergency isolation
+   - `emergency-isolate-application` for guided incident response
+   - Pre-stage containment rules in draft policy
+
+## Common Pitfalls
+- **Ringfencing without allowing infrastructure** — breaks DNS, AD, monitoring. Always identify infra first.
+- **Using override deny for ringfencing** — override deny blocks above allow rules. Your app-level allow rules won't work. Use regular deny.
+- **All Services rules everywhere** — coarse for ringfencing, but compliance zones need per-port/protocol rules.
+- **Skipping selective enforcement** — going straight to full enforcement breaks things. Use selective as a stepping stone.
+- **Not validating with traffic flows** — policy looks good on paper but real traffic patterns may differ. Always verify with actual flow data.
+- **Mixed enforcement modes** — inconsistent enforcement within an app creates security gaps. Use `get-workload-enforcement-status` to detect.
+
+## Compliance Framework Quick Reference
+
+| Framework | Focus Area | Key Illumio Tools |
+|-----------|-----------|-------------------|
+| PCI-DSS | CDE isolation | ringfence, override deny, compliance-check pci-dss |
+| DORA | Operational resilience, incident response | ringfence, emergency isolation, enforcement-readiness |
+| NIST 800-53 | Comprehensive security controls | all tools |
+| ISO 27001 | ISMS, network segregation | ringfence, compliance-check, enforcement-readiness |
+| SWIFT CSP | SWIFT secure zone | ringfence, override deny, find-unmanaged-traffic |
+| HIPAA | ePHI protection | ringfence, policy-coverage-report, compliance-check |
+| CIS Controls | Prioritized cyber defense | identify-infra, ringfence, detect-lateral-movement |
+"""
+    },
 }
 
 @server.list_resources()
@@ -1478,8 +2215,8 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
                 "properties": {
                     "framework": {
                         "type": "string",
-                        "enum": ["pci-dss", "nist", "cis", "general"],
-                        "description": "Compliance framework to check against (default: general)",
+                        "enum": ["pci-dss", "dora", "nist", "cis", "iso-27001", "swift-csp", "hipaa", "general"],
+                        "description": "Compliance framework to check against (default: general). Read the corresponding illumio://compliance/* resource for detailed framework guidance.",
                         "default": "general"
                     },
                     "app_name": {
@@ -4910,6 +5647,48 @@ async def handle_call_tool(
                     ],
                     "high_risk_ports": [3389, 22, 23, 445, 135, 139, 21, 69],
                 },
+                "dora": {
+                    "name": "DORA (Digital Operational Resilience Act)",
+                    "checks": [
+                        {"id": "DORA-9.2", "name": "Network access restriction", "description": "Implement policies to restrict network access (Article 9.2)"},
+                        {"id": "DORA-9.3", "name": "Immediate isolation capability", "description": "Design network to allow immediate severing/isolation of affected systems (Article 9.3)"},
+                        {"id": "DORA-8.1", "name": "ICT asset identification", "description": "Identify and document all ICT-supported business functions and assets (Article 8.1)"},
+                        {"id": "DORA-10.1", "name": "Anomaly detection", "description": "Detect anomalous activities and ICT incidents (Article 10.1)"},
+                        {"id": "DORA-25.1", "name": "Resilience testing", "description": "Perform vulnerability and network security assessments (Article 25.1)"},
+                    ],
+                    "high_risk_ports": [3389, 22, 23, 445, 135, 139, 1433, 3306, 5432, 1521, 27017, 6379],
+                },
+                "iso-27001": {
+                    "name": "ISO 27001:2022",
+                    "checks": [
+                        {"id": "A.8.22", "name": "Network segregation", "description": "Groups of information services, users, and systems shall be segregated"},
+                        {"id": "A.8.20", "name": "Networks security", "description": "Secure networks including mechanisms for filtering traffic"},
+                        {"id": "A.5.9", "name": "Asset inventory", "description": "Maintain inventory of information and associated assets"},
+                        {"id": "A.8.26", "name": "Application security requirements", "description": "Security requirements identified when developing/acquiring applications"},
+                    ],
+                    "high_risk_ports": [3389, 22, 23, 445, 135, 139, 1433, 3306, 5432, 21],
+                },
+                "swift-csp": {
+                    "name": "SWIFT Customer Security Programme",
+                    "checks": [
+                        {"id": "SWIFT-1.1", "name": "SWIFT environment protection", "description": "Protect SWIFT infrastructure from general IT environment"},
+                        {"id": "SWIFT-1.4", "name": "Internet access restriction", "description": "SWIFT-connected systems must not have direct internet access"},
+                        {"id": "SWIFT-2.1", "name": "Internal data flow security", "description": "Ensure confidentiality and integrity of data flows between SWIFT components"},
+                        {"id": "SWIFT-5.1", "name": "Logical access control", "description": "Enforce least-privilege access to SWIFT systems"},
+                        {"id": "SWIFT-6.4", "name": "Logging and monitoring", "description": "Record and monitor security events in the SWIFT secure zone"},
+                    ],
+                    "high_risk_ports": [3389, 22, 23, 445, 135, 139, 21, 80, 1433, 3306, 5432],
+                },
+                "hipaa": {
+                    "name": "HIPAA Security Rule",
+                    "checks": [
+                        {"id": "HIPAA-164.312(a)", "name": "Access control", "description": "Implement technical policies to allow access only to authorized persons/software"},
+                        {"id": "HIPAA-164.312(b)", "name": "Audit controls", "description": "Implement mechanisms to record and examine activity in systems containing ePHI"},
+                        {"id": "HIPAA-164.312(e)", "name": "Transmission security", "description": "Guard against unauthorized access to ePHI during transmission"},
+                        {"id": "HIPAA-164.308(a)(1)", "name": "Security management process", "description": "Prevent, detect, contain, and correct security violations"},
+                    ],
+                    "high_risk_ports": [3389, 22, 23, 445, 135, 139, 1433, 3306, 5432, 1521, 21, 80],
+                },
                 "general": {
                     "name": "General Security Best Practices",
                     "checks": [
@@ -5092,8 +5871,22 @@ async def handle_call_tool(
             total_checks = passed + failed + warnings
             compliance_score = round(passed / total_checks * 100, 1) if total_checks > 0 else 0
 
+            # Map framework key to resource URI for detailed guidance
+            framework_resource_map = {
+                "pci-dss": "illumio://compliance/pci-dss",
+                "dora": "illumio://compliance/dora",
+                "nist": "illumio://compliance/nist-800-53",
+                "iso-27001": "illumio://compliance/iso-27001",
+                "swift-csp": "illumio://compliance/swift-csp",
+                "hipaa": "illumio://compliance/hipaa",
+                "cis": "illumio://compliance/cis-controls",
+                "general": "illumio://compliance/segmentation-methodology",
+            }
+
             result = {
                 "framework": fw["name"],
+                "resource_uri": framework_resource_map.get(framework, "illumio://compliance/segmentation-methodology"),
+                "resource_hint": f"Read the resource at {framework_resource_map.get(framework, 'illumio://compliance/segmentation-methodology')} for detailed {fw['name']} guidance and remediation steps",
                 "scope": {
                     "app": app_name or "all",
                     "env": env_name or "all",

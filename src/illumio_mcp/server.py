@@ -61,6 +61,216 @@ MCP_BUG_MAX_RESULTS = 500
 server = Server("illumio-mcp")
 logging.debug("Server initialized")
 
+# ---------------------------------------------------------------------------
+# Illumio Knowledge Base — MCP Resources
+# ---------------------------------------------------------------------------
+# These resources provide persistent domain knowledge to the LLM so it
+# understands Illumio concepts without relying solely on tool descriptions.
+
+ILLUMIO_RESOURCES = {
+    "illumio://concepts/rule-processing": {
+        "name": "Illumio Rule Processing Order",
+        "description": "How Illumio processes rules — essential for understanding policy behavior",
+        "content": """# Illumio Rule Processing Order
+
+Rules in Illumio are processed in strict priority order. Understanding this is CRITICAL for correct policy design.
+
+## Processing Order (highest to lowest priority)
+
+1. **Essential rules** — Built-in rules that cannot be modified. Always processed first.
+
+2. **Override Deny rules** — BLOCK traffic, overriding ALL allow rules below them.
+   - Created via the deny_rules API with `"override": true`
+   - These deny traffic regardless of any allow rules — "this must not happen under any circumstances"
+   - Use cases:
+     - Emergency isolation of compromised systems
+     - Hard compliance blocks (e.g., PCI zones that must never reach the internet)
+     - Blocking an active attack vector
+     - Any scenario where no allow rule should ever override the block
+   - NEVER use override deny for normal segmentation or ringfencing — use regular deny rules instead
+   - Example: "Block ALL traffic to app X immediately" or "PCI zone must never reach external networks"
+
+3. **Allow rules** — Normal rules in rulesets that permit specific traffic.
+   - This is where ringfence rules live (both intra-scope and extra-scope)
+   - Processed AFTER override deny, so override deny wins if both match
+
+4. **Deny rules** — Block specific traffic (regular deny, NOT override).
+   - Created via the deny_rules API with `"override": false`
+   - Processed AFTER allow rules, so allow rules take precedence
+   - Used in selective enforcement ringfencing to block unknown inbound traffic
+   - Known remote apps get allow rules (step 3) which are processed before this deny (step 4)
+
+5. **Default action** — What happens when no rule matches:
+   - **Selective enforcement mode**: default = ALLOW ALL (deny rules are actively enforced, everything else passes)
+   - **Full enforcement mode**: default = DENY ALL (only explicitly allowed traffic passes)
+
+## Key Implications
+
+- Override Deny > Allow > Deny > Default
+- In selective mode, you NEED a deny rule to block anything (default is allow-all)
+- In full enforcement, you NEED allow rules to permit anything (default is deny-all)
+- Override deny should NEVER be used for routine segmentation — it's for emergencies only
+- Ringfencing uses regular deny rules (step 4) + allow rules (step 3), never override deny (step 2)
+"""
+    },
+    "illumio://concepts/enforcement-modes": {
+        "name": "Illumio Enforcement Modes",
+        "description": "Enforcement modes control how policy rules affect workload traffic",
+        "content": """# Illumio Enforcement Modes
+
+Each workload has an enforcement mode that determines how policy affects its traffic.
+
+## Modes (from least to most restrictive)
+
+### Idle
+- No policy enforcement at all
+- VEN is installed but not actively managing firewall rules
+- Used during initial deployment or troubleshooting
+
+### Visibility Only
+- VEN reports traffic flows but does NOT enforce any rules
+- All traffic is allowed regardless of policy
+- Used for traffic discovery and policy modeling before enforcement
+
+### Selective Enforcement
+- Default action is **ALLOW ALL**
+- Only **deny rules** are actively enforced
+- Allow rules exist for documentation/visibility but don't change traffic behavior
+- Use case: "I want to block specific things but allow everything else"
+- Ringfencing in selective mode requires a deny rule to be effective
+- Good stepping stone between visibility and full enforcement
+
+### Full Enforcement
+- Default action is **DENY ALL**
+- Only traffic explicitly permitted by allow rules can pass
+- Most restrictive and most secure mode
+- Use case: "Only explicitly allowed traffic should flow"
+- Requires comprehensive policy before enabling — missing rules will break connectivity
+
+## Recommended Rollout Order
+
+1. **Visibility Only** — discover traffic patterns, build policy
+2. **Selective Enforcement** — enforce deny rules, validate allow rules don't break anything
+3. **Full Enforcement** — flip to deny-all default once policy is comprehensive
+
+## Mixed Enforcement Warning
+Having workloads in the same app with different enforcement modes is a common issue during rollouts. Use `get-workload-enforcement-status` to detect this.
+"""
+    },
+    "illumio://concepts/segmentation": {
+        "name": "Illumio Segmentation & Ringfencing",
+        "description": "Core concepts for application segmentation and ringfencing",
+        "content": """# Illumio Segmentation Concepts
+
+## Labels
+Illumio uses a label system (not traditional network zones) to identify workloads:
+- **Role** — what the workload does (web, db, app-server)
+- **Application** — which application it belongs to (CRM, Ordering, ELK)
+- **Environment** — deployment environment (Production, Staging, Development)
+- **Location** — physical or logical location (US-East, Cloud, DC1)
+
+An application is uniquely identified by its **app + env** label combination.
+
+## Rulesets and Scopes
+- A **ruleset** contains rules and has one or more **scopes**
+- A scope defines which workloads the ruleset applies to (e.g., app=CRM, env=Production)
+- Rules within a ruleset are either:
+  - **Intra-scope** — traffic between workloads inside the scope (unscoped_consumers=false)
+  - **Extra-scope** — traffic from outside the scope into it (unscoped_consumers=true)
+
+## Ringfencing
+Ringfencing = coarse-grained app-to-app segmentation on All Services:
+
+### Standard Ringfence
+1. Create a ruleset scoped to [app, env]
+2. Add an intra-scope allow rule: All Workloads -> All Workloads on All Services
+3. For each remote app that needs access, add an extra-scope allow rule
+
+### Selective Ringfence
+Same as standard, plus:
+4. Add a **deny rule** (regular, NOT override deny) blocking all inbound
+5. The deny rule (step 4 in processing) catches unknown traffic
+6. Allow rules for known remote apps (step 3 in processing) are processed first, so they pass through
+
+### Override Deny is NOT for Ringfencing
+Override deny blocks traffic above ALL allow rules. If you use it for ringfencing, your allow rules for known remote apps won't work because override deny is processed first. Override deny means "this traffic must not happen under any circumstances" — use it for emergency isolation, hard compliance blocks, or active attack response. Never for routine segmentation.
+
+## Deny Consumer Flavors
+Controls where the deny rule is enforced (Illumio writes deny rules to the consumer/source side):
+- **`any`** — Consumer = IP list "Any (0.0.0.0/0)". Deny only at destination workloads. Safest.
+- **`ams`** — Consumer = All Workloads. Deny pushed to every managed source workload. Broader.
+- **`ams_and_any`** — Both. Maximum coverage.
+
+## Policy Coverage
+Traffic flows have a `policy_decision`:
+- **allowed** — covered by active allow rules
+- **potentially_blocked** — would be blocked if draft policy were provisioned
+- **blocked** — currently blocked by active policy
+
+When creating ringfence rules, remote apps are tagged:
+- **already_allowed** — all flows already covered by existing policy (rule created for documentation)
+- **newly_allowed** — at least one flow would be blocked without the new rule (filling a gap)
+
+## Infrastructure Services
+Infrastructure services (DNS, AD, monitoring) should be policy'd FIRST because many apps depend on them. Use `identify-infrastructure-services` to find them. If you ringfence an app before allowing its infrastructure dependencies, you break it.
+"""
+    },
+    "illumio://concepts/draft-active-policy": {
+        "name": "Illumio Draft vs Active Policy",
+        "description": "Understanding draft and active policy states and provisioning",
+        "content": """# Draft vs Active Policy
+
+Illumio uses a two-stage policy model:
+
+## Draft Policy
+- All mutations (create, update, delete) go to `/sec_policy/draft/`
+- Draft changes are NOT enforced — they're a staging area
+- Multiple changes can be accumulated before provisioning
+- Draft policy can be simulated: traffic flows show `potentially_blocked` for flows that WOULD be blocked if the draft were provisioned
+
+## Active Policy
+- Currently enforced policy at `/sec_policy/active/`
+- Read-only — cannot be modified directly
+- Only changes when draft policy is provisioned
+
+## Provisioning
+- Moves draft changes to active state
+- Use `provision-policy` tool to provision
+- Use `compare-draft-active` to preview what would change
+- Always review draft changes before provisioning
+- Provisioning is atomic — all changes go live at once
+
+## Policy Simulation
+The `policy_decision` field on traffic flows is extremely powerful:
+- Shows what would happen if current draft policy were active
+- `potentially_blocked` = "this traffic would break if you provision"
+- Use this to validate policy BEFORE enforcing it
+- The `enforcement-readiness` tool uses this to assess readiness
+"""
+    },
+}
+
+@server.list_resources()
+async def handle_list_resources() -> list[types.Resource]:
+    """List Illumio knowledge base resources."""
+    resources = []
+    for uri, info in ILLUMIO_RESOURCES.items():
+        resources.append(types.Resource(
+            uri=uri,
+            name=info["name"],
+            description=info["description"],
+            mimeType="text/plain"
+        ))
+    return resources
+
+@server.read_resource()
+async def handle_read_resource(uri) -> str:
+    """Read an Illumio knowledge base resource."""
+    uri_str = str(uri)
+    if uri_str in ILLUMIO_RESOURCES:
+        return ILLUMIO_RESOURCES[uri_str]["content"]
+    raise ValueError(f"Unknown resource: {uri_str}")
+
 @server.list_prompts()
 async def handle_list_prompts() -> list[types.Prompt]:
     """
@@ -96,6 +306,22 @@ async def handle_list_prompts() -> list[types.Prompt]:
                 types.PromptArgument(
                     name="application_environment",
                     description="Environment of the application to analyze",
+                    required=True,
+                )
+            ]
+        ),
+        types.Prompt(
+            name="emergency-isolate-application",
+            description="Emergency isolation of an application using override deny rules — blocks ALL traffic to/from the app immediately, overriding any existing allow rules. Use only for security incidents.",
+            arguments=[
+                types.PromptArgument(
+                    name="application_name",
+                    description="Name of the application to isolate",
+                    required=True,
+                ),
+                types.PromptArgument(
+                    name="application_environment",
+                    description="Environment of the application to isolate",
                     required=True,
                 )
             ]
@@ -182,6 +408,48 @@ Add all the outbound traffic to that ruleset using roles, applications and envir
                             Categorize traffic into infrastructure and application traffic.
                             Find out if the application is internet facing or not.
                             Show illumio role labels, as well as application and environment labels in the output.
+                        """
+                    )
+                )
+            ]
+        )
+
+    elif name == "emergency-isolate-application":
+        return types.GetPromptResult(
+            description="Emergency isolation of an application using override deny rules",
+            messages=[
+                types.PromptMessage(
+                    role="user",
+                    content=types.TextContent(
+                        type="text",
+                        text=f"""
+EMERGENCY ISOLATION: Immediately isolate application {arguments['application_name']} in environment {arguments['application_environment']}.
+
+This is a security incident response action. You MUST use OVERRIDE DENY rules — these are the highest priority deny rules
+in Illumio that block traffic even when allow rules exist. This is the correct and ONLY use case for override deny.
+
+IMPORTANT CONTEXT — Illumio Rule Processing Order:
+1. Essential rules (built-in)
+2. **Override Deny rules** — THIS IS WHAT WE USE HERE. Blocks traffic above ALL allow rules.
+3. Allow rules — these CANNOT override our override deny
+4. Regular deny rules — NOT sufficient for emergency isolation (allow rules are processed first)
+5. Default action
+
+Steps:
+1. First, get the labels for app={arguments['application_name']} and env={arguments['application_environment']} to get their hrefs.
+2. Find or create a ruleset scoped to this app+env (name it "EMERGENCY-ISOLATE-{arguments['application_name']}-{arguments['application_environment']}").
+3. Create an OVERRIDE DENY rule (override_deny=true) that blocks ALL inbound traffic:
+   - providers: All Workloads (ams)
+   - consumers: All Workloads (ams) AND IP list Any (0.0.0.0/0)
+   - ingress_services: All Services
+   - unscoped_consumers: true
+   - override_deny: true  ← CRITICAL: this makes it override deny, not regular deny
+4. Optionally create a second override deny rule for outbound if full isolation is needed.
+5. PROVISION the policy immediately using provision-policy so it takes effect.
+6. Report what was created and confirm the application is now isolated.
+
+WARNING: Override deny rules override ALL allow rules. This WILL break all connectivity to/from this application.
+Only use this for genuine security incidents. To undo, delete the override deny rules and re-provision.
                         """
                     )
                 )
@@ -556,7 +824,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="create-deny-rule",
-            description="Create a deny rule in an existing ruleset. Deny rules block specific traffic (processed after allow rules). Override deny rules (override_deny=true) are the HIGHEST priority — they block traffic even when allow rules exist, overriding everything. Use override deny only for emergencies like isolating a compromised system. Rule processing order: 1) Essential rules, 2) Override Deny (blocks above all), 3) Allow rules, 4) Deny rules, 5) Default action.",
+            description="Create a deny rule in an existing ruleset. Deny rules block specific traffic (processed after allow rules). Override deny rules (override_deny=true) are the HIGHEST priority — they block traffic even when allow rules exist, meaning 'this must not happen under any circumstances.' Use override deny for emergency isolation, hard compliance blocks, or active attack response — NOT for normal segmentation or ringfencing. Rule processing order: 1) Essential rules, 2) Override Deny (blocks above all), 3) Allow rules, 4) Deny rules, 5) Default action.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -592,7 +860,7 @@ async def handle_list_tools() -> list[types.Tool]:
                     },
                     "override_deny": {
                         "type": "boolean",
-                        "description": "If true, creates an override deny rule — the highest priority deny that blocks traffic even if allow rules exist. Used for emergency blocking scenarios (e.g., isolating a compromised app). If false (default), creates a regular deny rule.",
+                        "description": "If true, creates an override deny rule — the highest priority deny that blocks traffic even if allow rules exist. Means 'this must not happen under any circumstances.' Use for emergency isolation, hard compliance blocks (e.g., PCI zones), or active attack response. If false (default), creates a regular deny rule (processed after allow rules).",
                         "default": False
                     },
                     "unscoped_consumers": {
@@ -2687,6 +2955,21 @@ async def handle_call_tool(
             is_override = arguments.get("override_deny", False)
             rule_type = "override_deny" if is_override else "deny"
 
+            # Guardrail: warn about override deny usage
+            override_warning = None
+            if is_override:
+                override_warning = (
+                    "IMPORTANT: You are creating an OVERRIDE DENY rule. This is the highest priority deny "
+                    "in Illumio — it blocks traffic even when allow rules exist, overriding everything. "
+                    "Override deny means 'this traffic must not happen under any circumstances.' "
+                    "Use cases: emergency isolation of compromised systems, hard compliance blocks "
+                    "(e.g., PCI zones that must never reach the internet), or any scenario where "
+                    "no allow rule should ever override the block. "
+                    "Do NOT use override deny for normal segmentation or ringfencing — use regular deny rules instead. "
+                    "Rule processing order: Essential > Override Deny > Allow > Deny > Default."
+                )
+                logger.warning(f"Override deny rule being created: {override_warning}")
+
             # Build providers
             providers = []
             for provider in arguments["providers"]:
@@ -2754,12 +3037,16 @@ async def handle_call_tool(
             resp = pce.post(endpoint, json=rule_payload)
             result = resp.json()
 
-            return [types.TextContent(
-                type="text",
-                text=json.dumps({
+            response = {
                     "message": f"Successfully created {rule_type} rule",
                     "rule": result
-                }, indent=2)
+                }
+            if override_warning:
+                response["override_deny_warning"] = override_warning
+
+            return [types.TextContent(
+                type="text",
+                text=json.dumps(response, indent=2)
             )]
 
         except Exception as e:

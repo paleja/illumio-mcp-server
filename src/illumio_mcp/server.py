@@ -985,6 +985,824 @@ Segmenting ePHI systems reduces the scope of HIPAA compliance requirements.
 | CIS Controls | Prioritized cyber defense | identify-infra, ringfence, detect-lateral-movement |
 """
     },
+    "illumio://architecture/pce-ven": {
+        "name": "PCE & VEN Architecture",
+        "description": "Illumio platform architecture — PCE (Policy Compute Engine) and VEN (Virtual Enforcement Node) components, deployment models, and scaling",
+        "content": """# Illumio Architecture — PCE & VEN
+
+## Two Core Components
+
+### Policy Compute Engine (PCE)
+The PCE is the central brain of Illumio. It:
+- Stores all data (workloads, labels, rules, traffic flows)
+- Calculates security policy and distributes it to VENs
+- Provides the management UI and API
+- Can scale to support hundreds of thousands of workloads
+
+### Virtual Enforcement Node (VEN)
+The VEN runs on each managed workload. It:
+- Reports traffic flows and workload state back to the PCE
+- Implements security policy by managing the local host firewall (iptables/Windows Firewall)
+- Available for Linux, Windows, Solaris, and AIX
+- Lightweight — minimal CPU, RAM, and disk usage
+- Upgrades can be pushed centrally from the PCE
+
+## PCE Deployment Options
+
+### Cloud Service (SaaS)
+- Managed by Illumio's operations team
+- Quick start, no hardware required
+- SOC 2-compliant, highly resilient
+- Recommended for 0–10,000 workloads or organizations without deep Linux expertise
+
+### On-Premises
+- Full control over all PCE operations
+- Recommended for 0–250,000 workloads
+- Required for strict data residency or custodianship requirements
+- Needs Linux servers with specific OS and storage requirements
+- Minimum 4 servers per cluster (supports up to 10,000 workloads)
+- Larger footprints support up to 25,000 workloads per cluster
+
+### Supercluster (Large Scale)
+- Federated set of clusters with near-real-time replication
+- For organizations with 25,000+ managed workloads
+- Single-pane-of-glass visibility across all clusters
+- Each cluster can operate independently during outages
+- Common pattern: regional PCE clusters (e.g., Americas, EMEA, APAC)
+
+## Redundancy & High Availability
+
+### Split-Cluster (Metro-Area HA)
+- PCE nodes split between two data centers
+- Hot-hot deployment — survives total failure of one data center
+- Specific latency requirements between the two sites
+
+### Cold-Standby (DR)
+- No specific latency requirements
+- Can be combined with split-cluster for full DR capability
+
+### VEN Connectivity
+- No specific latency requirement between PCE and VEN
+- Global deployments work fine (e.g., PCE in North America, VENs in Asia)
+- VENs continue enforcing last-known policy if PCE connectivity is lost
+
+## PCE Hardening
+- On-premises PCEs need hardening per Illumio's published hardening guide
+- Protect against malicious connections and data integrity threats
+- Illumio provides tools to implement recommended controls
+"""
+    },
+    "illumio://concepts/workloads": {
+        "name": "Workload Types & VEN Deployment",
+        "description": "Managed vs unmanaged workloads, VEN deployment strategies, and workload lifecycle",
+        "content": """# Illumio Workloads
+
+## What Is a Workload?
+A workload is any endpoint on your network:
+- Physical or virtual server
+- Public cloud instance (AWS EC2, Azure VM, GCP)
+- Container
+- Storage appliance
+- VIP on a load balancer or proxy device
+- Any device with an IP address
+
+## Two Types of Workloads
+
+### Managed Workloads
+- Have the VEN software installed and activated
+- Under full management by Illumio
+- VEN provides traffic visibility AND policy enforcement
+- VEN reports workload state, open ports, running processes
+- Can be in any enforcement mode: idle, visibility_only, selective, full
+
+### Unmanaged Workloads
+- Represented in the PCE but do NOT have VEN installed
+- Important for modeling — they appear in dependency maps
+- Typical for network appliances, legacy systems, or devices that can't run VEN
+- Can have labels assigned for policy purposes
+- Traffic TO them from managed workloads is visible
+- Traffic FROM them is NOT visible (no VEN to report it)
+- Use `find-unmanaged-traffic` to identify traffic involving unmanaged workloads
+
+## VEN Deployment Strategy
+
+### Distribution Methods
+- **Automation tools**: Chef, Puppet, Ansible for Linux/Windows
+- **SCCM**: Push to Windows workloads via Microsoft SCCM
+- **Golden image**: Pre-install VEN in your base image, activates on deployment
+- **Custom scripting**: SSH to each workload and pull the VEN package
+
+### Deployment Order (recommended)
+1. Start small — pilot with a limited set of workloads
+2. Deploy to infrastructure/core services first (DNS, AD, backup)
+3. Expand to business applications by criticality
+4. Create unmanaged workloads for devices that can't run VEN
+5. Full coverage is the goal — gaps in VEN deployment = gaps in visibility
+
+### VEN Behavior on Activation
+- Immediately establishes communication with the PCE
+- Reports local network state (interfaces, open ports, processes)
+- Begins providing traffic visibility
+- Starts enforcing policy based on its configured enforcement mode
+
+## Enforcement Modes per Workload
+Each workload has its own enforcement mode:
+- **Idle**: VEN installed but not active
+- **Visibility Only**: Reports traffic, no enforcement
+- **Selective**: Enforces deny rules only, default=allow
+- **Full**: Enforces all rules, default=deny
+
+**Important**: Enforcement mode is set per-workload, not globally. You can have different
+modes within the same application during rollout. Use `get-workload-enforcement-status`
+to detect mixed enforcement within an app (a common issue during rollouts).
+
+## Workloads and Deny Rules
+The design guide predates deny rule features. Key additions:
+- **Deny rules** (regular): Written to the consumer (source) workload's firewall
+- **Override deny rules**: Block traffic above all allow rules — for emergencies only
+- Deny rules only apply to **managed workloads** (unmanaged workloads have no VEN to enforce them)
+- The `deny_consumer` parameter controls which workloads receive the deny rule:
+  - `any`: Only destination workloads get the deny rule (safest)
+  - `ams`: All managed workloads get the deny rule (broader enforcement)
+  - `ams_and_any`: Both (maximum coverage)
+"""
+    },
+    "illumio://architecture/labels": {
+        "name": "Label Design (R+A+E+L)",
+        "description": "Illumio's four-dimensional label model — Role, Application, Environment, Location — design principles, data quality, and governance",
+        "content": """# Illumio Label Design — R+A+E+L
+
+## The Four Dimensions
+
+Each workload is identified by up to four labels:
+
+| Dimension | Purpose | Examples |
+|-----------|---------|----------|
+| **R**ole | Function the workload performs | Web Server, Database, App Server, Load Balancer |
+| **A**pplication | Application the workload belongs to | Payroll, CRM, ELK, SAP, Oracle EBS |
+| **E**nvironment | Deployment stage | Production, Staging, QA, Development, DR |
+| **L**ocation | Physical or logical location | US-East, Cloud-AWS, DC1, London, EMEA |
+
+## Key Design Principles
+
+### Labels Are NOT Groups
+Each label dimension is **independent**. Labels combine to form a unique set of security
+properties for each workload. A production HR webserver in London inherits policies from:
+- All London servers
+- All HR servers
+- All production webservers
+This intersection-based model is what makes Illumio's policy scalable.
+
+### Consistency Within Dimensions
+Each dimension should ALWAYS refer to the same logical concept:
+- If Role holds application tiers (web, app, db), always use it for tiers
+- Don't mix concepts (e.g., don't put sensitivity classifications in the Role dimension)
+- Consistent usage enables predictable policy behavior
+
+### Security Policies Use Labels, Not IPs
+Policies are written as label-to-label rules:
+- "Web servers in Production can connect to Database servers in Production on port 3306"
+- NOT "10.0.1.5 can connect to 10.0.2.10 on port 3306"
+- When workloads change (scale up/down, IP changes), policy automatically adapts
+
+### Unique Application Identity
+An application is identified by **App + Env** label combination:
+- App=CRM, Env=Production → one application instance
+- App=CRM, Env=Staging → different application instance
+- Ringfencing scopes to this combination
+
+## Data Sources for Labels
+
+### Where to Get Label Data
+- **CMDB** (ServiceNow, BMC, etc.) — most comprehensive source
+- **Cloud metadata** — AWS tags, Azure tags, GCP labels
+- **Hostname conventions** — parse app/env/role from naming patterns
+- **API integration** — sync labels automatically from external sources
+- **Manual entry** — smallest deployments or one-off systems
+
+### Label Data Quality
+- Most organizations start with 50-80% accuracy for environment labels
+- Other dimensions (app, role) are often lower
+- **This is OK** — Illumio is designed to work with incomplete data
+- Traffic flow visibility helps you discover and correct labels
+- The process of adopting Illumio improves your metadata quality
+
+### Data Governance
+- Consider appointing a **data guardian** for label quality
+- Automate label sync from authoritative sources via API
+- Refresh labels regularly (daily or real-time as changes occur)
+- Updates to labels automatically trigger policy recalculation
+
+## Label Design Anti-Patterns
+- **Too few labels**: Everything labeled as "App=Server" — no meaningful segmentation
+- **Too many roles**: Hundreds of unique roles — policy becomes unmanageable
+- **Inconsistent dimensions**: Location sometimes means physical DC, sometimes means region
+- **Missing labels**: Workloads without labels can't be targeted by policy
+- **Stale labels**: Workload moved to production but still labeled Development
+
+## Labels and Policy Rules
+When writing rules, labels define the scope:
+- **Ruleset scope**: App=CRM, Env=Production applies rules to all CRM Production workloads
+- **Intra-scope rules**: Traffic between workloads in the same scope
+- **Extra-scope rules**: Traffic from outside the scope into it
+- **Deny rules**: Can target any label combination (but deny rules are NOT in the design guide — they were added later)
+"""
+    },
+    "illumio://methodology/first-principles": {
+        "name": "FIRST Principles of Security Segmentation",
+        "description": "Illumio's FIRST methodology — Find, Identify, Reach out, Start, Target — the recommended approach to deploying segmentation",
+        "content": """# Illumio's FIRST Principles of Security Segmentation
+
+The FIRST Principles provide a structured methodology for deploying micro-segmentation.
+Follow these in order for the highest chance of success.
+
+## F — Find Metadata Sources
+
+**Goal**: Know where your workload data lives before you start.
+
+- Identify your CMDB, cloud metadata, hostname conventions, spreadsheets
+- Determine which sources can provide which label dimensions (R, A, E, L)
+- Assess data quality — 50-80% accuracy for environment labels is typical to start
+- Plan how to sync this data to the PCE (API, manual, or hybrid)
+
+**Illumio Tools**: `get-workloads` to see current inventory, labels reveal data gaps
+
+## I — Identify a Label Design
+
+**Goal**: Design your R+A+E+L label model before applying it.
+
+- Role: what does the workload do? (web, db, app-server)
+- Application: which application? (CRM, Payroll, SAP)
+- Environment: what stage? (Production, Staging, Dev)
+- Location: where is it? (physical DC, cloud region, regulatory jurisdiction)
+- Keep each dimension consistent — same concept always
+- Labels are NOT groups — they combine for unique identity
+
+**Illumio Tools**: `get-label-dimensions` to see current label schema
+
+## R — Reach Out to Service Owners Early
+
+**Goal**: Engage stakeholders before enforcement begins.
+
+- Service owners know their applications' expected traffic patterns
+- They can validate dependency maps against expected behavior
+- Early engagement prevents surprises when enforcement starts
+- Common stakeholders:
+  - Application owners (validate app-to-app communication)
+  - Network team (understand existing firewall rules)
+  - Security team (define compliance requirements)
+  - Operations team (identify maintenance and backup traffic)
+
+**Illumio Tools**: `get-traffic-flows-summary` produces dependency reports service owners can review
+
+## S — Start with Core Services
+
+**Goal**: Policy infrastructure services first — they affect everything else.
+
+Core services are consumed by most/all workloads:
+- Active Directory / LDAP
+- DNS
+- NTP
+- Backup (NetBackup, Veeam, Commvault)
+- Monitoring (Splunk, Datadog, Zabbix, Nagios)
+- Patching / SCCM / WSUS
+- Anti-virus / EDR management servers
+
+**Why first?**
+- Core services represent a large percentage of total traffic
+- Rules for them de-clutter the dependency map
+- If you ringfence an app without allowing its core service dependencies, you break it
+- Core service rules are consistent across workloads — write once, apply broadly
+
+**Illumio Tools**: `identify-infrastructure-services` uses traffic graph analysis to automatically
+find core services based on connection patterns (high fan-in = provider infra, high fan-out = consumer infra)
+
+## T — Target Ringfencing for Business Applications
+
+**Goal**: After core services are handled, ringfence your business applications.
+
+Ringfencing = coarse-grained segmentation at the app level:
+1. Each app gets a virtual perimeter (ruleset scoped to app+env)
+2. Internal communication within the app is allowed (intra-scope rule)
+3. Known remote apps get explicit allow rules (extra-scope rules)
+4. Unknown traffic is blocked (via deny rules in selective mode, or default-deny in full mode)
+
+**Progressive approach**:
+- Start with `dry_run=true` to preview what rules would be created
+- Use `skip_allowed=false` to create rules for ALL observed traffic (self-documenting)
+- Validate with `enforcement-readiness` before enforcing
+- Start with selective enforcement (deny rules block, default=allow)
+- Graduate to full enforcement (default=deny) after validation
+
+**Illumio Tools**: `create-ringfence`, `enforcement-readiness`, `get-policy-coverage-report`
+
+## Putting FIRST Together
+
+```
+Find metadata  →  Get label data into the PCE
+     ↓
+Identify labels  →  Design R+A+E+L model
+     ↓
+Reach out  →  Engage service owners, validate dependency maps
+     ↓
+Start with core  →  Policy DNS, AD, backup, monitoring first
+     ↓
+Target ringfencing  →  Ringfence business apps, progressive enforcement
+```
+
+Each step builds on the previous one. Skipping steps leads to broken connectivity,
+missing policies, and frustrated stakeholders.
+"""
+    },
+    "illumio://methodology/core-services": {
+        "name": "Core Services Strategy",
+        "description": "Why infrastructure services must be policy'd first — identification, types, and strategy for core service segmentation",
+        "content": """# Core Services — Policy Infrastructure First
+
+## What Are Core Services?
+
+Core services are infrastructure services consumed by most or all workloads in your environment.
+They provide platform or operating system-level functionality.
+
+**Examples:**
+| Service | Protocol/Port | Direction | Why It's Core |
+|---------|--------------|-----------|---------------|
+| Active Directory / LDAP | 389/636, 88 (Kerberos) | Provider (inbound) | Authentication for all Windows workloads |
+| DNS | 53 UDP/TCP | Provider (inbound) | Name resolution for everything |
+| NTP | 123 UDP | Provider (inbound) | Time sync, affects logging and auth |
+| NetBackup / Veeam | Various | Consumer (outbound) | Backup agents connect to all workloads |
+| Splunk / SIEM | 514, 8089, 9997 | Consumer (outbound) | Log collection from all workloads |
+| SCCM / WSUS / Patching | 8530, 443 | Provider (inbound) | OS patching for managed workloads |
+| Monitoring (Nagios, Zabbix) | Various | Consumer (outbound) | Health checks on all systems |
+| Anti-virus mgmt (SEP, CrowdStrike) | Various | Both | Agent management and updates |
+| DHCP | 67/68 UDP | Provider | IP assignment |
+| Proxy / Web Gateway | 8080, 3128 | Provider (inbound) | Internet access for workloads |
+
+## Why Policy Core Services First?
+
+### 1. They Are a Large Percentage of Traffic
+Core service connections often represent 40-60% of total observed traffic.
+Policy'ing them first dramatically simplifies the dependency map for application owners.
+
+### 2. They De-Clutter the Dependency Map
+Once core service rules exist, application dependency maps show only
+application-specific traffic — which is what app owners need to validate.
+
+### 3. Ringfencing Without Core Services Breaks Things
+If you ringfence an application but haven't allowed DNS, AD, or monitoring:
+- DNS lookups fail → app can't resolve hostnames
+- AD auth fails → users can't log in
+- Monitoring breaks → false alerts, SLA violations
+- Backup stops → data loss risk
+
+**Always** create core service rules before ringfencing business apps.
+
+### 4. Core Service Rules Are Broadly Applicable
+A rule like "All workloads can reach DNS on port 53" applies everywhere.
+Write it once, and it covers every app you ringfence later.
+
+## Identifying Core Services
+
+### Automatic Detection
+Use `identify-infrastructure-services` to find core services automatically.
+It analyzes the app-to-app communication graph and scores services:
+
+**Provider Infrastructure** (consumed by many apps):
+- High in-degree centrality (many apps connect TO it)
+- Low out-degree (doesn't initiate connections to many apps)
+- Examples: DNS, AD, NTP, SCCM
+
+**Consumer Infrastructure** (connects out to many apps):
+- High out-degree centrality (connects TO many apps)
+- Low in-degree (few apps connect to it)
+- Examples: Monitoring, backup, log shipping, vulnerability scanners
+
+**Scoring:**
+- Provider score: 40% in-degree + 30% consumer ratio + 25% betweenness + 5% volume
+- Consumer score: 40% out-degree + 30% producer ratio + 25% betweenness + 5% volume
+- Mixed-traffic dampening reduces scores for bidirectional apps (those are business apps, not infra)
+- Classification: Core Infrastructure (≥75), Shared Service (≥50), Standard Application (<50)
+
+### Manual Identification
+Ask your infrastructure team: "Which services do ALL servers need?"
+The answer is your core services list.
+
+## Core Service Policy Strategy
+
+### Step 1: Identify
+```
+identify-infrastructure-services --env Production --min_flows 100
+```
+
+### Step 2: Label
+Ensure all core service workloads have correct labels:
+- Role: DNS, ActiveDirectory, Backup, Monitoring, etc.
+- App: Infrastructure or the specific product name
+- Env: Production (core services are almost always production)
+
+### Step 3: Write Allow Rules
+Create rulesets with broad scopes that allow core service traffic:
+- "All Workloads → DNS on port 53"
+- "All Workloads → AD on ports 389, 636, 88"
+- "Backup servers → All Workloads on backup agent ports"
+
+### Step 4: Validate
+- `get-traffic-flows-summary` confirms traffic is policy-covered
+- `get-policy-coverage-report` shows any remaining gaps
+
+### Step 5: Then Ringfence Apps
+Now that core services have rules, ringfencing business apps won't break infrastructure dependencies.
+
+## Core Services and Deny Rules
+The design guide predates deny/override deny rules. Important additions:
+
+- **DO NOT** ringfence core services with deny rules in most cases
+  - Core services need broad accessibility — deny rules restrict that
+  - Exception: restrict management ports (SSH/RDP) on core service servers to jump hosts
+
+- **Override deny** may apply to core services in emergency scenarios:
+  - Compromised AD server → override deny to isolate it immediately
+  - Core service with active vulnerability → override deny to block exploitation
+  - These are emergency actions, not normal policy
+"""
+    },
+    "illumio://methodology/ringfencing-patterns": {
+        "name": "Ringfencing Patterns & Granularity Levels",
+        "description": "Three levels of application segmentation — App Group Level, Role Level All Services, Role Level Specified Services — with deny rule integration",
+        "content": """# Ringfencing Patterns — Progressive Granularity
+
+Illumio supports multiple levels of segmentation granularity. You can mix and match
+based on each application's security requirements.
+
+## Pattern 1: App Group Level (Application Ringfencing)
+
+**The most common pattern.** A virtual perimeter around the entire application.
+
+```
+┌─────────────────────────────────────────┐
+│  App=CRM, Env=Production                │
+│                                          │
+│  ┌─────┐   ┌─────┐   ┌─────┐           │
+│  │ Web │←→│ App │←→│ DB  │           │
+│  └─────┘   └─────┘   └─────┘           │
+│     ↕ All workloads communicate freely   │
+└─────────────────────────────────────────┘
+     ↑ Only authorized external apps can enter
+```
+
+**Rules:**
+- Intra-scope: All Workloads → All Workloads on All Services (free internal comms)
+- Extra-scope: Specific remote apps → All Workloads on All Services
+- In selective mode: Add deny rule blocking all other inbound
+
+**Characteristics:**
+- Simple to implement and maintain
+- Prevents lateral movement BETWEEN applications
+- Does NOT restrict lateral movement WITHIN the application
+- Best balance of security vs complexity for most apps
+- Most Illumio customers use this as their baseline
+
+## Pattern 2: Role Level — All Services
+
+**Adds role-based restrictions within the application perimeter.**
+
+```
+┌──────────────────────────────────────────┐
+│  App=CRM, Env=Production                 │
+│                                           │
+│  ┌─────┐   ┌─────┐   ┌─────┐            │
+│  │ Web │──→│ App │──→│ DB  │            │
+│  └─────┘   └─────┘   └─────┘            │
+│     Web cannot directly reach DB          │
+└──────────────────────────────────────────┘
+```
+
+**Rules:**
+- Role-to-role allow rules: Web → App on All Services, App → DB on All Services
+- No direct Web → DB rule (so Web can't reach the database)
+- Extra-scope: External apps → specific roles only
+
+**Characteristics:**
+- More restrictive than App Group Level
+- Prevents lateral movement between tiers within the app
+- Still uses All Services — any port is allowed between authorized roles
+- Requires knowledge of which roles talk to which
+
+## Pattern 3: Role Level — Specified Services
+
+**The most granular level. Role-to-role, port-by-port.**
+
+```
+┌──────────────────────────────────────────┐
+│  App=CRM, Env=Production                 │
+│                                           │
+│  ┌─────┐ 8443  ┌─────┐ 3306  ┌─────┐   │
+│  │ Web │──────→│ App │──────→│ DB  │   │
+│  └─────┘       └─────┘       └─────┘   │
+│     Only specified ports allowed          │
+└──────────────────────────────────────────┘
+```
+
+**Rules:**
+- Web → App on TCP 8443 only
+- App → DB on TCP 3306 only
+- No other connections allowed within the app
+
+**Characteristics:**
+- Highest security — prevents lateral movement even within an app
+- Requires detailed knowledge of exact ports/protocols per role
+- More maintenance as applications change over time
+- Recommended for **Digital Crown Jewels** (sensitive apps)
+
+## Choosing the Right Pattern
+
+| Factor | App Group | Role All Services | Role Specified |
+|--------|-----------|-------------------|----------------|
+| Security level | Good | Better | Best |
+| Complexity | Low | Medium | High |
+| Maintenance | Low | Medium | Higher |
+| Knowledge needed | App boundaries | Role-to-role flow | Exact ports |
+| Best for | Most apps | Important apps | Crown jewels |
+
+**Recommended approach:**
+- App Group Level for 80% of applications (baseline protection)
+- Role Level All Services for important business apps
+- Role Level Specified Services for digital crown jewels (PCI CDE, SWIFT zone, ePHI)
+- You can upgrade an app's pattern anytime without changing other apps
+
+## Deny Rules and Ringfencing (Not in Original Design Guide)
+
+The design guide predates Illumio's deny rule feature. Here's how deny rules integrate:
+
+### Standard Ringfencing (Full Enforcement)
+- No deny rules needed — full enforcement default is DENY ALL
+- Allow rules are sufficient: anything not explicitly allowed is blocked
+
+### Selective Ringfencing (Selective Enforcement)
+- Selective mode default is ALLOW ALL — deny rules are required to block traffic
+- Add a **regular deny rule** (`override: false`) blocking inbound to the app scope
+- Known remote apps get **allow rules** which are processed BEFORE the deny rule
+- Processing order: Allow (step 3) → Deny (step 4) → Default allow
+
+### Override Deny — NOT for Ringfencing
+Override deny is processed BEFORE allow rules (step 2). If you use it for ringfencing:
+- Your extra-scope allow rules for known remote apps will be OVERRIDDEN
+- Nothing can get through, including legitimate traffic
+- Override deny means "this must not happen under any circumstances"
+- Use cases: emergency isolation, hard compliance blocks, active attack response
+- NEVER use override deny for routine segmentation
+
+### Deny Consumer Options
+When adding deny rules for ringfencing:
+- `any` (default): Deny rule enforced only at destination workloads. Safest.
+- `ams`: Deny rule pushed to ALL managed workloads. Broader but wider blast radius.
+- `ams_and_any`: Both. Maximum enforcement but highest impact.
+"""
+    },
+    "illumio://methodology/crown-jewels": {
+        "name": "Digital Crown Jewels",
+        "description": "Identifying and protecting your most sensitive applications with the highest level of segmentation control",
+        "content": """# Digital Crown Jewels — Maximum Protection
+
+## What Are Digital Crown Jewels?
+
+Crown jewels are applications that store or process your most sensitive data:
+- **Payment/financial data** — PCI cardholder data, banking systems, trading platforms
+- **Personal information** — PII, PHI (health records), employee data
+- **Trade secrets** — intellectual property, source code repositories, R&D systems
+- **Critical infrastructure** — industrial control systems, SCADA
+- **Regulatory data** — SWIFT messaging systems, SOX financial reporting
+- **Authentication systems** — Active Directory, certificate authorities, identity providers
+
+## Why Crown Jewels Need Special Treatment
+
+Most applications can be adequately protected with **App Group Level ringfencing** —
+a coarse-grained perimeter around the entire application.
+
+Crown jewels need **Role Level Specified Services** — the most granular pattern:
+- Port-by-port, protocol-by-protocol control
+- Web → App on TCP 8443 ONLY, App → DB on TCP 3306 ONLY
+- No "All Services" rules within the crown jewel perimeter
+- This prevents lateral movement WITHIN the application
+
+## Identifying Crown Jewels
+
+### Ask These Questions
+1. What data, if breached, would make headlines?
+2. What systems, if compromised, would halt business operations?
+3. What regulatory frameworks apply, and which systems are in scope?
+4. What applications have the highest data sensitivity classification?
+
+### Common Crown Jewels by Industry
+| Industry | Crown Jewels |
+|----------|-------------|
+| Financial Services | Trading platforms, payment processing, SWIFT, core banking |
+| Healthcare | EMR/EHR systems, PACS imaging, patient databases |
+| Retail | POS systems, payment processing, customer databases |
+| Manufacturing | SCADA/ICS, R&D systems, patent databases |
+| Technology | Source code repos, CI/CD pipelines, secrets management |
+| Government | Classified systems, citizen data, critical infrastructure |
+
+## Crown Jewel Protection Strategy
+
+### Step 1: Identify and Label
+- Label crown jewel workloads with specific app and role labels
+- Example: App=PaymentGateway, Role=PaymentDB, Env=Production
+- Ensure 100% label accuracy — no room for error on critical systems
+
+### Step 2: Map Dependencies
+```
+get-traffic-flows-summary --app PaymentGateway --env Production
+identify-infrastructure-services --app PaymentGateway --env Production
+```
+- Document every connection, every port, every protocol
+- Validate with application owners — "is this expected traffic?"
+- Flag any unexpected connections for investigation
+
+### Step 3: Write Granular Rules (Role Level Specified Services)
+Instead of "All Workloads → All Workloads on All Services":
+- Payment Web → Payment App on TCP 8443
+- Payment App → Payment DB on TCP 3306
+- Payment App → Payment Cache on TCP 6379
+- Monitoring → All Roles on TCP 9100 (metrics)
+- Nothing else is allowed within the perimeter
+
+### Step 4: Add Compliance-Specific Controls
+For PCI crown jewels:
+- Block high-risk ports (RDP, Telnet, FTP) with deny rules
+- Override deny for hard compliance blocks ("CDE must never reach internet")
+- Encrypt all data-in-transit (block HTTP, require HTTPS)
+
+For SWIFT crown jewels:
+- Override deny blocking SWIFT zone → internet
+- Restrict admin access (SSH/RDP) to jump hosts only
+- Block all unencrypted protocols
+
+### Step 5: Enforce Progressively
+1. Visibility Only → collect traffic flows, validate rules
+2. Selective → deny rules active, verify no breakage
+3. Full enforcement → default=deny, only explicitly allowed traffic flows
+
+### Step 6: Monitor Continuously
+```
+compliance-check --framework pci-dss --app PaymentGateway --env Production
+detect-lateral-movement-paths --app PaymentGateway --env Production
+enforcement-readiness --app PaymentGateway --env Production
+```
+
+## Crown Jewels and Deny/Override Deny Rules
+
+### Regular Deny Rules for Selective Mode
+- Crown jewels in selective mode NEED deny rules for ringfencing
+- Block ALL inbound except explicitly allowed sources
+- Use the most restrictive deny_consumer option appropriate
+
+### Override Deny for Hard Compliance Blocks
+Override deny is appropriate for crown jewels in specific scenarios:
+- "PCI CDE must NEVER reach the internet" → override deny
+- "SWIFT zone must NEVER have direct internet access" → override deny
+- "ePHI database must NEVER be accessible from development" → override deny
+- These are absolute blocks that no allow rule should ever bypass
+
+### Override Deny is NOT for Day-to-Day Segmentation
+Even for crown jewels, normal segmentation uses regular deny rules + allow rules.
+Override deny is the nuclear option — use it only for compliance-mandated hard blocks
+and emergency isolation scenarios.
+
+## Maintenance Considerations
+Crown jewel protection at Role Level Specified Services requires more maintenance:
+- Application changes (new microservice, port change) require rule updates
+- Regular reviews with application owners
+- `compare-draft-active` to detect policy drift
+- Automated compliance checks on a schedule
+- The maintenance cost is justified by the data sensitivity
+"""
+    },
+    "illumio://operations/logging-monitoring": {
+        "name": "Logging, Monitoring & SIEM Integration",
+        "description": "PCE logging types, SIEM integration, traffic data records, auditable events, and alerting strategies",
+        "content": """# Logging, Monitoring, and Alerting with Illumio
+
+## Three Types of PCE Log Data
+
+### 1. PCE Internal Messages
+- Unstructured log records about PCE component operations
+- For support and troubleshooting only
+- Managed automatically — log rotation, disk space management
+- Stored in PCE log directory (on-premises)
+- Not typically exported to SIEM
+
+### 2. Auditable Events
+Structured messages about significant security events:
+- Agent activated / deactivated
+- User password changed
+- Security policy modified or provisioned
+- Label created / modified / deleted
+- Workload paired / unpaired
+- Enforcement mode changed
+
+**Properties:**
+- Well-defined data fields (structured, parseable)
+- Comply with Common Criteria Class FAU Security Audit standard
+- Stored in PCE database, queryable via web UI and API
+- Can be published to SIEM via syslog or Fluentd
+- Available in JSON, CEF, or LEEF formats
+
+**Illumio Tool**: `get-events` provides access to auditable events with severity filtering
+
+### 3. Traffic Data Records
+Periodic summaries of connections observed on managed workloads:
+- Source and destination (IP, hostname, workload)
+- Labels for source and destination (when available)
+- Port, protocol, and process information
+- Policy decision: **allowed**, **blocked**, or **potentially_blocked**
+- Timestamp and volume data
+
+**Traffic record types:**
+- **Accepted**: Connections allowed by policy or default action
+- **Blocked**: Connections denied by policy enforcement
+- **Potentially Blocked**: Connections on non-enforcing workloads that WOULD be blocked if enforced
+
+**Volume warning:** Traffic data can be very high-volume. Ensure your SIEM has sufficient capacity.
+
+## SIEM Integration
+
+### Supported SIEM Products
+- **Splunk**: Illumio App for Splunk available on Splunkbase (turnkey integration)
+- **HPE ArcSight**: CEF format output
+- **IBM QRadar**: LEEF format output
+- **Any syslog-compatible SIEM**: JSON, CEF, or LEEF via syslog
+- **Fluentd-compatible systems**: Native Fluentd output
+
+### Integration Architecture
+```
+PCE → syslog/Fluentd → SIEM
+  ├── Auditable events (structured)
+  └── Traffic data records (high volume)
+```
+
+### What to Send to Your SIEM
+| Data Type | Volume | Value | Recommended |
+|-----------|--------|-------|-------------|
+| Auditable events | Low | High | Always export |
+| Accepted traffic | High | Medium | Export if capacity allows |
+| Blocked traffic | Medium | Very High | Always export |
+| Potentially blocked | Medium | High | Export during rollout |
+
+## Alerting Strategies
+
+### Individual Event Alerts
+High-priority events to alert on immediately:
+- **agent.tampering** — VEN detected unauthorized changes to local firewall rules
+- **enforcement_mode_changed** — workload enforcement mode was modified
+- **policy_provisioned** — security policy was pushed to active
+- **workload.unpaired** — VEN was removed from a managed workload
+
+### Aggregate/Trend Alerts
+Monitor totals and trends:
+- Total messages per day by type — sudden spikes indicate issues
+- Blocked traffic volume increase — may indicate attack or misconfiguration
+- New "potentially blocked" flows appearing — policy gaps
+- Workload count changes — track VEN deployment progress
+
+### Traffic-Based Alerting
+Use traffic data records for security monitoring:
+- **Cross-environment traffic**: Production ↔ Development connections (label-enriched flows make this easy)
+- **Unexpected protocol usage**: Telnet, FTP on production systems
+- **Lateral movement indicators**: New connections between previously unrelated apps
+- **Volume anomalies**: Sudden increase in traffic to a specific workload
+
+**Illumio Tools:**
+- `detect-lateral-movement-paths` — identifies potential lateral movement vectors
+- `find-unmanaged-traffic` — surfaces unknown connections
+- `get-traffic-flows-summary` — comprehensive traffic analysis
+
+## Operational Monitoring
+
+### PCE Health (On-Premises)
+- Monitor PCE component health via internal messages
+- Track PCE cluster state (primary/secondary, replication lag)
+- Disk space monitoring for log and database storage
+
+### VEN Health
+- Track VEN connectivity status via PCE
+- Alert on VEN tamper events
+- Monitor VEN version distribution for upgrade tracking
+
+### Policy Health
+- `compare-draft-active` — detect uncommitted draft changes
+- `enforcement-readiness` — track enforcement rollout progress
+- `compliance-check` — periodic compliance validation
+- `get-policy-coverage-report` — measure policy completeness
+
+## Traffic Data for Forensics
+Traffic data records are invaluable for incident investigation:
+- "Which workloads communicated with the compromised server in the last 7 days?"
+- "What ports were used for connections crossing from dev to prod?"
+- "When did the first unauthorized connection to the database appear?"
+- Labels enrich raw flow data with business context — you don't just see IPs, you see applications
+"""
+    },
 }
 
 @server.list_resources()

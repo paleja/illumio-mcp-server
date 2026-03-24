@@ -5584,11 +5584,9 @@ async def handle_call_tool(
             hrefs = arguments.get("hrefs")
 
             if hrefs:
-                # Provision specific items
-                payload = {
-                    "update_description": change_description,
-                    "change_subset": {"hrefs": hrefs}
-                }
+                # Provision specific items using the SDK's PolicyChangeset
+                # which correctly maps hrefs to typed keys (rule_sets, ip_lists, etc.)
+                provision_hrefs = hrefs
             else:
                 # Get all pending changes first
                 resp = pce.get("/sec_policy/pending")
@@ -5600,11 +5598,20 @@ async def handle_call_tool(
                         "status": "no_changes"
                     }, indent=2))]
 
-                # Collect all pending hrefs
+                # /sec_policy/pending returns a list of objects with 'href' keys,
+                # or a dict with resource type keys containing lists of objects
                 pending_hrefs = []
-                for item in pending:
-                    if isinstance(item, dict) and 'href' in item:
-                        pending_hrefs.append(item['href'])
+                if isinstance(pending, list):
+                    for item in pending:
+                        if isinstance(item, dict) and 'href' in item:
+                            pending_hrefs.append(item['href'])
+                elif isinstance(pending, dict):
+                    # Response may be keyed by resource type: rule_sets, ip_lists, etc.
+                    for resource_type, items in pending.items():
+                        if isinstance(items, list):
+                            for item in items:
+                                if isinstance(item, dict) and 'href' in item:
+                                    pending_hrefs.append(item['href'])
 
                 if not pending_hrefs:
                     return [types.TextContent(type="text", text=json.dumps({
@@ -5612,18 +5619,21 @@ async def handle_call_tool(
                         "status": "no_changes"
                     }, indent=2))]
 
-                payload = {
-                    "update_description": change_description,
-                    "change_subset": {"hrefs": pending_hrefs}
-                }
+                provision_hrefs = pending_hrefs
 
-            resp = pce.post("/sec_policy", json=payload)
-            result = resp.json()
+            # Use the SDK's provision_policy_changes method which correctly
+            # builds a PolicyChangeset (mapping hrefs to rule_sets, ip_lists, etc.)
+            policy_version = pce.provision_policy_changes(
+                change_description=change_description,
+                hrefs=provision_hrefs
+            )
 
             return [types.TextContent(type="text", text=json.dumps({
                 "message": "Policy provisioned successfully",
                 "change_description": change_description,
-                "result": result
+                "version": policy_version.version,
+                "workloads_affected": policy_version.workloads_affected,
+                "href": policy_version.href
             }, indent=2))]
 
         except Exception as e:

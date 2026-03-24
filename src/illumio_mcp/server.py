@@ -2,6 +2,7 @@ import asyncio
 import os
 import json
 import logging
+import urllib3
 from mcp.server.models import InitializationOptions
 import mcp.types as types
 from mcp.server import NotificationOptions, Server
@@ -55,6 +56,9 @@ PCE_PORT = os.getenv("PCE_PORT")
 PCE_ORG_ID = os.getenv("PCE_ORG_ID")
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
+PCE_TLS_VERIFY = os.getenv("PCE_TLS_VERIFY", "true").lower() not in ("false", "0", "no")
+if not PCE_TLS_VERIFY:
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 MCP_BUG_MAX_RESULTS = 500
 
@@ -3072,6 +3076,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             params = {"include": "labels", "max_results": arguments.get('max_results', 10000)}
             for param in ['name', 'hostname', 'ip_address', 'description', 'labels', 'enforcement_mode']:
@@ -3100,6 +3105,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
             connection_status = pce.check_connection()
             return [types.TextContent(
                 type="text",
@@ -3117,6 +3123,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
             label = Label(key=arguments['key'], value=arguments['value'])
             label = pce.labels.create(label)
             logger.debug(f"Label created with status: {label}")
@@ -3136,6 +3143,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
             label = pce.labels.get(params = { "key": arguments['key'], "value": arguments['value'] })
             if label:
                 pce.labels.delete(label[0])
@@ -3160,6 +3168,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             params = {}
             if arguments.get('key'):
@@ -3192,6 +3201,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             interfaces = []
             prefix = "eth"
@@ -3243,6 +3253,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             # Find the workload by href or name
             workload_obj = None
@@ -3305,6 +3316,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             workload_obj = None
             if arguments.get("href"):
@@ -3362,6 +3374,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             logger.debug(f"Due to a condition in MCP, max results is set to {MCP_BUG_MAX_RESULTS}")
             # TODO: fix this in the future...
@@ -3452,6 +3465,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             logger.debug(f"Due to a condition in MCP, max results is set to {MCP_BUG_MAX_RESULTS}")
             # TODO: fix this in the future...
@@ -3509,6 +3523,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             params = {}
             for param in ['name', 'description', 'labels']:
@@ -3587,6 +3602,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             params = {"max_results": arguments.get("max_results", 10000)}
             for param in ['name', 'description', 'fqdn', 'ip_address']:
@@ -3625,6 +3641,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             params = {}
             for param in ['event_type', 'severity', 'status', 'max_results', 'created_by']:
@@ -3678,6 +3695,7 @@ async def handle_call_tool(
             logger.debug("Initializing PCE connection...")
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
             
             # populate the label maps
             label_href_map = {}
@@ -3918,6 +3936,7 @@ async def handle_call_tool(
             logger.debug("Initializing PCE connection...")
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             params = {}
             for param in ['name', 'description', 'port', 'proto', 'process_name', 'max_results']:
@@ -3995,6 +4014,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
             
             href = arguments.get("href")
             key = arguments.get("key")
@@ -4067,6 +4087,7 @@ async def handle_call_tool(
             logger.debug("Initializing PCE connection...")
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             # Check if IP List already exists
             logger.debug(f"Checking if IP List '{arguments['name']}' already exists...")
@@ -4154,6 +4175,7 @@ async def handle_call_tool(
             logger.debug("Initializing PCE connection...")
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             # Find the IP List
             iplist = None
@@ -4254,6 +4276,7 @@ async def handle_call_tool(
             logger.debug("Initializing PCE connection...")
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             # Find the IP List
             iplist = None
@@ -4307,6 +4330,7 @@ async def handle_call_tool(
             logger.debug("Initializing PCE connection...")
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             # Find the ruleset
             ruleset = None
@@ -4423,6 +4447,7 @@ async def handle_call_tool(
             logger.debug("Initializing PCE connection...")
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             # Find the ruleset
             ruleset = None
@@ -4476,6 +4501,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             # Build label maps
             label_href_map = {}
@@ -4617,6 +4643,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             href = arguments["href"]
             if '/active/' in href:
@@ -4693,6 +4720,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             href = arguments["href"]
             if '/active/' in href:
@@ -4718,6 +4746,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             app_name = arguments["app_name"]
             env_name = arguments["env_name"]
@@ -5218,6 +5247,7 @@ async def handle_call_tool(
 
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             lookback_days = arguments.get("lookback_days", 90)
             min_connections = arguments.get("min_connections", 1)
@@ -5480,6 +5510,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             change_description = arguments.get("change_description", "Provisioned via MCP")
             hrefs = arguments.get("hrefs")
@@ -5541,6 +5572,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             resource_type = arguments.get("resource_type", "all")
 
@@ -5620,6 +5652,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             app_name = arguments["app_name"]
             env_name = arguments["env_name"]
@@ -5884,6 +5917,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             params = {"include": "labels", "max_results": 10000}
 
@@ -5984,6 +6018,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             app_name = arguments["app_name"]
             env_name = arguments["env_name"]
@@ -6120,6 +6155,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             lookback_days = arguments.get("lookback_days", 30)
             direction = arguments.get("direction", "both")
@@ -6241,6 +6277,7 @@ async def handle_call_tool(
 
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             lookback_days = arguments.get("lookback_days", 30)
             max_hops = arguments.get("max_hops", 4)
@@ -6427,6 +6464,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             framework = arguments.get("framework", "general")
             app_name = arguments.get("app_name")
@@ -6740,6 +6778,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             payload = {
                 "name": arguments["name"],
@@ -6765,6 +6804,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             # Find service by href or name
             service_href = None
@@ -6810,6 +6850,7 @@ async def handle_call_tool(
         try:
             pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
             pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
 
             service_href = None
             if arguments.get("href"):
@@ -6841,6 +6882,7 @@ async def handle_call_tool(
 def to_dataframe(flows):
     pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
     pce.set_credentials(API_KEY, API_SECRET)
+    pce._session.verify = PCE_TLS_VERIFY
 
     label_href_map = {}
     value_href_map = {}

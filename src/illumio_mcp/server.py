@@ -3445,7 +3445,6 @@ async def handle_call_tool(
             pce._session.verify = PCE_TLS_VERIFY
 
             logger.debug(f"Due to a condition in MCP, max results is set to {MCP_BUG_MAX_RESULTS}")
-            # TODO: fix this in the future...
             arguments['max_results'] = MCP_BUG_MAX_RESULTS
 
             traffic_query = TrafficQuery.build(
@@ -3463,9 +3462,12 @@ async def handle_call_tool(
                 query_name=arguments.get('query_name', 'mcp-traffic-query')
             )
 
+            # Use async query with Accept: application/json header
+            # PCE 25.x returns CSV by default on download endpoint
             all_traffic = pce.get_traffic_flows_async(
                 query_name=arguments.get('query_name', 'mcp-traffic-query'),
-                traffic_query=traffic_query
+                traffic_query=traffic_query,
+                headers={'Accept': 'application/json'}
             )
             
             df = to_dataframe(all_traffic)
@@ -3536,10 +3538,11 @@ async def handle_call_tool(
             pce._session.verify = PCE_TLS_VERIFY
 
             logger.debug(f"Due to a condition in MCP, max results is set to {MCP_BUG_MAX_RESULTS}")
-            # TODO: fix this in the future...
-            if 'max_results' in arguments and arguments.get('max_results') > MCP_BUG_MAX_RESULTS:
-                logger.debug(f"Setting max results to {MCP_BUG_MAX_RESULTS} from original value {arguments.get('max_results')}")
-                arguments['max_results'] = MCP_BUG_MAX_RESULTS
+            max_results = int(arguments.get('max_results', 10000))
+            if max_results > MCP_BUG_MAX_RESULTS:
+                logger.debug(f"Setting max results to {MCP_BUG_MAX_RESULTS} from original value {max_results}")
+                max_results = MCP_BUG_MAX_RESULTS
+            arguments['max_results'] = max_results
 
             query = TrafficQuery.build(
                 start_date=arguments['start_date'],
@@ -3556,9 +3559,12 @@ async def handle_call_tool(
                 query_name=arguments.get('query_name', 'mcp-traffic-summary')
             )
 
+            # Use async query with Accept: application/json header
+            # PCE 25.x returns CSV by default on download endpoint
             all_traffic = pce.get_traffic_flows_async(
                 query_name=arguments.get('query_name', 'mcp-traffic-summary'),
-                traffic_query=query
+                traffic_query=query,
+                headers={'Accept': 'application/json'}
             )
 
             df = to_dataframe(all_traffic)

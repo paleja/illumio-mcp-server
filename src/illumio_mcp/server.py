@@ -3057,6 +3057,74 @@ rollouts. Returns a ranked list with scores, classification tiers, and connectiv
                 },
             }
         ),
+        types.Tool(
+            name="get-container-workload-profiles",
+            description="Get Container Workload Profiles for a container cluster. These profiles control how Kubernetes pods are managed by Illumio — mapping K8s namespaces to Illumio labels and enforcement modes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cluster_href": {"type": "string", "description": "Container cluster href (e.g., /orgs/1/container_clusters/uuid). If omitted, lists all container clusters first."},
+                    "namespace": {"type": "string", "description": "Filter by Kubernetes namespace name"},
+                    "managed": {"type": "boolean", "description": "Filter by managed (true) or unmanaged (false) profiles"},
+                },
+            }
+        ),
+        types.Tool(
+            name="update-container-workload-profile",
+            description="Update a Container Workload Profile to manage Kubernetes pods in Illumio. Set managed=true and assign labels to start managing pods in a namespace.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "profile_href": {"type": "string", "description": "Full href of the container workload profile (e.g., /orgs/1/container_clusters/uuid/container_workload_profiles/uuid)"},
+                    "managed": {"type": "boolean", "description": "Set to true to manage pods in this namespace"},
+                    "enforcement_mode": {
+                        "type": "string",
+                        "enum": ["visibility_only", "full", "idle", "selective"],
+                        "description": "Enforcement mode for managed pods"
+                    },
+                    "assign_labels": {
+                        "type": "array",
+                        "items": {"type": "object", "properties": {"href": {"type": "string"}}, "required": ["href"]},
+                        "description": "Illumio labels to assign to pods (e.g., [{'href': '/orgs/1/labels/5'}])"
+                    },
+                },
+                "required": ["profile_href"]
+            }
+        ),
+        types.Tool(
+            name="get-kubernetes-workloads",
+            description="Get Kubernetes Workloads (CLAS mode) from a container cluster. Shows Deployments, Services, and other K8s objects managed by Illumio with their labels and policy sync state.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cluster_href": {"type": "string", "description": "Container cluster href (e.g., /orgs/1/container_clusters/uuid). If omitted, lists all clusters first."},
+                    "namespace": {"type": "string", "description": "Filter by Kubernetes namespace"},
+                    "max_results": {"type": "integer", "description": "Maximum results to return (default 500)"},
+                },
+            }
+        ),
+        types.Tool(
+            name="get-container-clusters",
+            description="Get container clusters (Kubernetes/OpenShift) registered in the PCE. Shows cluster name, CLAS mode, online status, kubelink version, and node count.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Filter by cluster name (partial match)"},
+                    "max_results": {"type": "integer", "description": "Maximum results to return (default 50)"},
+                },
+            }
+        ),
+        types.Tool(
+            name="get-pairing-profiles",
+            description="Get pairing profiles from the PCE. Pairing profiles define the initial enforcement mode and labels for VENs when they pair with the PCE.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Filter by pairing profile name (partial match)"},
+                    "max_results": {"type": "integer", "description": "Maximum results to return (default 50)"},
+                },
+            }
+        ),
     ]
 
 @server.call_tool()
@@ -3064,7 +3132,7 @@ async def handle_call_tool(
     name: str, arguments: dict | None
 ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     logger.debug(f"Handling tool call: {name} with arguments: {arguments}")
-    
+
     if name == "get-workloads":
         # harmonize the logging
         logger.debug("=" * 80)  
@@ -6886,6 +6954,231 @@ async def handle_call_tool(
             )]
         except Exception as e:
             error_msg = f"Failed to delete service: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "get-container-workload-profiles":
+        logger.debug("=" * 80)
+        logger.debug("GET CONTAINER WORKLOAD PROFILES CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
+
+            cluster_href = arguments.get("cluster_href")
+
+            if not cluster_href:
+                # List all container clusters first
+                resp = pce.get("/orgs/{}/container_clusters".format(PCE_ORG_ID))
+                clusters = resp.json()
+                if not clusters:
+                    return [types.TextContent(type="text", text=json.dumps({"message": "No container clusters found", "clusters": []}, indent=2))]
+                # Use first cluster if only one, otherwise return list
+                if len(clusters) == 1:
+                    cluster_href = clusters[0]["href"]
+                else:
+                    result = [{"href": c["href"], "name": c.get("name"), "online": c.get("online")} for c in clusters]
+                    return [types.TextContent(type="text", text=json.dumps({
+                        "message": f"Found {len(clusters)} clusters. Specify cluster_href to get profiles.",
+                        "clusters": result
+                    }, indent=2))]
+
+            resp = pce.get("{}/container_workload_profiles".format(cluster_href))
+            profiles = resp.json()
+
+            # Apply filters
+            ns_filter = arguments.get("namespace")
+            managed_filter = arguments.get("managed")
+            if ns_filter:
+                profiles = [p for p in profiles if p.get("namespace") == ns_filter]
+            if managed_filter is not None:
+                profiles = [p for p in profiles if p.get("managed") == managed_filter]
+
+            result = []
+            for p in profiles:
+                labels = [{"href": l.get("href"), "key": l.get("key"), "value": l.get("value")} for l in p.get("assign_labels", [])]
+                result.append({
+                    "href": p.get("href"),
+                    "name": p.get("name"),
+                    "namespace": p.get("namespace"),
+                    "managed": p.get("managed"),
+                    "enforcement_mode": p.get("enforcement_mode"),
+                    "assign_labels": labels,
+                })
+
+            return [types.TextContent(type="text", text=json.dumps({
+                "profiles": result,
+                "total_count": len(result)
+            }, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to get container workload profiles: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "update-container-workload-profile":
+        logger.debug("=" * 80)
+        logger.debug("UPDATE CONTAINER WORKLOAD PROFILE CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
+
+            profile_href = arguments["profile_href"]
+            payload = {}
+            if "managed" in arguments:
+                payload["managed"] = arguments["managed"]
+            if "enforcement_mode" in arguments:
+                payload["enforcement_mode"] = arguments["enforcement_mode"]
+            if "assign_labels" in arguments:
+                payload["assign_labels"] = arguments["assign_labels"]
+
+            resp = pce.put(profile_href, json=payload)
+
+            return [types.TextContent(type="text", text=json.dumps({
+                "message": f"Successfully updated container workload profile",
+                "href": profile_href,
+                "updated_fields": list(payload.keys())
+            }, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to update container workload profile: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "get-kubernetes-workloads":
+        logger.debug("=" * 80)
+        logger.debug("GET KUBERNETES WORKLOADS CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
+
+            params = {"max_results": arguments.get("max_results", 500)}
+            if arguments.get("namespace"):
+                params["namespace"] = arguments["namespace"]
+
+            resp = pce.get("/orgs/{}/kubernetes_workloads".format(PCE_ORG_ID), params=params)
+            workloads = resp.json()
+
+            # Filter by cluster if specified
+            cluster_href = arguments.get("cluster_href")
+            if cluster_href:
+                workloads = [w for w in workloads if w.get("container_cluster", {}).get("href") == cluster_href]
+
+            result = []
+            for w in workloads:
+                labels = [{"key": l.get("key"), "value": l.get("value")} for l in w.get("labels", [])]
+                result.append({
+                    "href": w.get("href"),
+                    "name": w.get("name"),
+                    "kind": w.get("kind"),
+                    "namespace": w.get("namespace"),
+                    "labels": labels,
+                    "enforcement_mode": w.get("enforcement_mode"),
+                    "security_policy_sync_state": w.get("security_policy_sync_state"),
+                    "cluster": w.get("container_cluster", {}).get("name"),
+                })
+
+            return [types.TextContent(type="text", text=json.dumps({
+                "kubernetes_workloads": result,
+                "total_count": len(result)
+            }, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to get kubernetes workloads: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "get-container-clusters":
+        logger.debug("=" * 80)
+        logger.debug("GET CONTAINER CLUSTERS CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
+
+            params = {"max_results": arguments.get("max_results", 50)}
+            if arguments.get("name"):
+                params["name"] = arguments["name"]
+
+            resp = pce.get("/orgs/{}/container_clusters".format(PCE_ORG_ID), params=params)
+            clusters = resp.json()
+
+            result = []
+            for c in clusters:
+                nodes = c.get("nodes", [])
+                result.append({
+                    "href": c.get("href"),
+                    "name": c.get("name"),
+                    "online": c.get("online"),
+                    "clas_mode": c.get("clas_mode"),
+                    "cluster_mode": c.get("cluster_mode"),
+                    "kubelink_version": c.get("kubelink_version"),
+                    "container_runtime": c.get("container_runtime"),
+                    "node_count": len(nodes),
+                    "nodes": [{"name": n.get("name")} for n in nodes],
+                })
+
+            return [types.TextContent(type="text", text=json.dumps({
+                "container_clusters": result,
+                "total_count": len(result)
+            }, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to get container clusters: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
+
+    elif name == "get-pairing-profiles":
+        logger.debug("=" * 80)
+        logger.debug("GET PAIRING PROFILES CALLED")
+        logger.debug(f"Arguments received: {json.dumps(arguments, indent=2)}")
+        logger.debug("=" * 80)
+
+        try:
+            pce = PolicyComputeEngine(PCE_HOST, port=PCE_PORT, org_id=PCE_ORG_ID)
+            pce.set_credentials(API_KEY, API_SECRET)
+            pce._session.verify = PCE_TLS_VERIFY
+
+            params = {"max_results": arguments.get("max_results", 50)}
+            if arguments.get("name"):
+                params["name"] = arguments["name"]
+
+            resp = pce.get("/orgs/{}/pairing_profiles".format(PCE_ORG_ID), params=params)
+            profiles = resp.json()
+
+            result = []
+            for p in profiles:
+                labels = [{"href": l.get("href"), "key": l.get("key"), "value": l.get("value")} for l in p.get("labels", [])]
+                result.append({
+                    "href": p.get("href"),
+                    "name": p.get("name"),
+                    "enforcement_mode": p.get("enforcement_mode"),
+                    "enforcement_mode_lock": p.get("enforcement_mode_lock"),
+                    "enabled": p.get("enabled"),
+                    "labels": labels,
+                })
+
+            return [types.TextContent(type="text", text=json.dumps({
+                "pairing_profiles": result,
+                "total_count": len(result)
+            }, indent=2))]
+
+        except Exception as e:
+            error_msg = f"Failed to get pairing profiles: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return [types.TextContent(type="text", text=json.dumps({"error": error_msg}, indent=2))]
 

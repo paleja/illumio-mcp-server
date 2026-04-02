@@ -74,6 +74,7 @@ class TestToolListing:
                     "find-unmanaged-traffic",
                     "detect-lateral-movement-paths",
                     "compliance-check",
+                    "get-kubernetes-workloads", "get-pairing-profiles", "update-container-workload-profile", "get-container-workload-profiles", "get-container-clusters"
                 ])
                 assert len(tool_names) == len(expected), \
                     f"Tool count mismatch: got {len(tool_names)}, expected {len(expected)}. Extra: {set(tool_names) - set(expected)}, Missing: {set(expected) - set(tool_names)}"
